@@ -72,10 +72,17 @@ def arg_parse():
     parser.add_argument('--name-suffix', dest='name_suffix',
             help='suffix added to the output filename')
 
+    parser.add_argument('--link_prediction', dest='link_prediction',
+                        help='whether do link prediction task')
+    parser.add_argument('--fraction', dest='fraction',
+                        help='fraction of edges that used to form training and test data')
+
     parser.set_defaults(datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
-                        dataset='syn1',
+                        dataset='AIDS',
+                        link_prediction=True,
+                        fraction=0.3,
                         opt='adam',   # opt_parser
                         opt_scheduler='none',
                         max_nodes=100,

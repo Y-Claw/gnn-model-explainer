@@ -43,85 +43,97 @@ import models
 # Prepare Data
 #
 #############################
-def prepare_data(graphs, args, test_graphs=None, max_nodes=0):
+def prepare_data(graph, edge_labels, args, test_graphs=None):
+    edges = list(graph.edges())
+    num_edges = len(edges)
+    num_train = int(num_edges * args.fraction * args.train_ratio)
+    num_test = int(num_edges * args.fraction * (1 - args.train_ratio))
 
-    random.shuffle(graphs)
-    if test_graphs is None:
-        train_idx = int(len(graphs) * args.train_ratio)
-        test_idx = int(len(graphs) * (1 - args.test_ratio))
-        train_graphs = graphs[:train_idx]
-        val_graphs = graphs[train_idx:test_idx]
-        test_graphs = graphs[test_idx:]
-    else:
-        train_idx = int(len(graphs) * args.train_ratio)
-        train_graphs = graphs[:train_idx]
-        val_graphs = graph[train_idx:]
+    # generate negative data
+    num_nodes = graph.number_of_nodes()
+    num_edge_labels = max(edge_labels) + 1
+    neg_data = []
+    neg_labels = []
+    k = 0
+    total_num = num_train + num_test
+    while (k < total_num):
+        src = random.randint(0, num_nodes)
+        dst = random.randint(0, num_nodes)
+        elabel = random.randint(0, num_edge_labels)
+        if not graph.has_edge(src, dst):
+            neg_data.append((src, dst))
+            neg_labels.append(elabel)
+            k = k + 1
+        else:
+            flag = 0
+            for i in range(len(graph[src][dst])):
+                if graph[src][dst][i]['label'] == elabel:
+                    flag = 1
+                    break
+            if flag == 0:
+                neg_data.append((src, dst))
+                neg_labels.append(elabel)
+                k = k + 1
+    neg_train_edges = neg_data[:num_train]
+    neg_train_labels = neg_labels[:num_train]
+    neg_test_edges = neg_data[num_train:]
+    neg_test_labels = neg_labels[num_train:]
+
+
+    # generate positive data
+    idx = [i for i in range(num_edges)]
+    np.random.shuffle(idx)
+    pos_train_idx = idx[:num_train]
+    pos_test_idx = idx[num_train:(num_train+num_test)]
+    pos_train_edges = []
+    pos_train_labels = []
+    pos_test_edges = []
+    pos_test_labels = []
+    for index in pos_train_idx:
+        pos_train_edges.append(edges[index])
+        pos_train_labels.append(edge_labels[index])
+        graph.remove_edge(edges[index][0], edges[index][1])
+    for index in pos_test_idx:
+        pos_test_edges.append(edges[index])
+        pos_test_labels.append(edge_labels[index])
+        graph.remove_edge(edges[index][0], edges[index][1])
+
+
     print(
-        "Num training graphs: ",
-        len(train_graphs),
-        "; Num validation graphs: ",
-        len(val_graphs),
-        "; Num testing graphs: ",
-        len(test_graphs),
+        "Num training edges: ",
+        len(pos_train_edges) + len(neg_train_edges),
+        "; Num testing edges: ",
+        len(pos_test_edges) + len(neg_test_edges)
     )
 
-    print("Number of graphs: ", len(graphs))
-    print("Number of edges: ", sum([G.number_of_edges() for G in graphs]))
-    print(
-        "Max, avg, std of graph size: ",
-        max([G.number_of_nodes() for G in graphs]),
-        ", " "{0:.2f}".format(np.mean([G.number_of_nodes() for G in graphs])),
-        ", " "{0:.2f}".format(np.std([G.number_of_nodes() for G in graphs])),
-    )
+    print("Number of edges left: ", graph.number_of_edges())
 
-    # minibatch
-    dataset_sampler = graph_utils.GraphSampler(
-        train_graphs,
-        normalize=False,
-        max_num_nodes=max_nodes,
-        features=args.feature_type,
-    )
-    train_dataset_loader = torch.utils.data.DataLoader(
-        dataset_sampler,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-    )
+    # change edge labels into one-hop form
+    for i in range(len(pos_train_labels)):
+        edge_label_one_hot = [0] * num_edge_labels
+        edge_label = pos_train_labels[i]
+        edge_label_one_hot[edge_label] = 1
+        pos_train_labels[i] = edge_label_one_hot
 
-    dataset_sampler = graph_utils.GraphSampler(
-        val_graphs, 
-        normalize=False, 
-        max_num_nodes=max_nodes, 
-        features=args.feature_type
-    )
-    val_dataset_loader = torch.utils.data.DataLoader(
-        dataset_sampler,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-    )
+    for i in range(len(pos_test_labels)):
+        edge_label_one_hot = [0] * num_edge_labels
+        edge_label = pos_test_labels[i]
+        edge_label_one_hot[edge_label] = 1
+        pos_test_labels[i] = edge_label_one_hot
 
-    dataset_sampler = graph_utils.GraphSampler(
-        test_graphs,
-        normalize=False,
-        max_num_nodes=max_nodes,
-        features=args.feature_type,
-    )
-    test_dataset_loader = torch.utils.data.DataLoader(
-        dataset_sampler,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-    )
+    for i in range(len(neg_train_labels)):
+        edge_label_one_hot = [0] * num_edge_labels
+        edge_label = neg_train_labels[i]
+        edge_label_one_hot[edge_label] = 1
+        neg_train_labels[i] = edge_label_one_hot
 
-    return (
-        train_dataset_loader,
-        val_dataset_loader,
-        test_dataset_loader,
-        dataset_sampler.max_num_nodes,
-        dataset_sampler.feat_dim,
-        dataset_sampler.assign_feat_dim,
-    )
+    for i in range(len(neg_test_labels)):
+        edge_label_one_hot = [0] * num_edge_labels
+        edge_label = neg_test_labels[i]
+        edge_label_one_hot[edge_label] = 1
+        neg_test_labels[i] = edge_label_one_hot
+
+    return graph, pos_train_edges, pos_train_labels, pos_test_edges, pos_test_labels, neg_train_edges, neg_train_labels, neg_test_edges, neg_test_labels
 
 
 #############################
@@ -484,7 +496,6 @@ def train_node_classifier_multigraph(G_list, labels, model, args, writer=None):
     io_utils.save_checkpoint(model, optimizer, args, num_epochs=-1, cg_dict=cg_data)
 
 
-
 #############################
 #
 # Evaluate Trained Model
@@ -548,44 +559,19 @@ def evaluate_node(ypred, labels, train_idx, test_idx):
     return result_train, result_test
 
 
-
 #############################
 #
 # Run Experiments
 #
 #############################
-def ppi_essential_task(args, writer=None):
-    feat_file = "G-MtfPathways_gene-motifs.csv"
-    # G = io_utils.read_biosnap('data/ppi_essential', 'PP-Pathways_ppi.csv', 'G-HumanEssential.tsv',
-    #        feat_file=feat_file)
-    G = io_utils.read_biosnap(
-        "data/ppi_essential",
-        "hi-union-ppi.tsv",
-        "G-HumanEssential.tsv",
-        feat_file=feat_file,
+def link_prediction_task(args, writer=None):
+    graph, edge_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
+        args.datadir, args.dataset
     )
-    labels = np.array([G.nodes[u]["label"] for u in G.nodes()])
-    num_classes = max(labels) + 1
-    input_dim = G.nodes[next(iter(G.nodes()))]["feat"].shape[0]
+    input_dim = graph.graph["feat_dim"]
 
-    if args.method == "attn":
-        print("Method: attn")
-    else:
-        print("Method:", args.method)
-        args.loss_weight = torch.tensor([1, 5.0], dtype=torch.float).cuda()
-        model = models.GcnEncoderNode(
-            input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            num_classes,
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-        if args.gpu:
-            model = model.cuda()
+    graph, pos_train_edges, pos_train_labels, pos_test_edges, pos_test_labels, neg_train_edges, neg_train_labels, neg_test_edges, neg_test_labels = prepare_data(graph, edge_labels, args)
 
-    train_node_classifier(G, labels, model, args, writer=writer)
 
 
 def syn_task1(args, writer=None):
@@ -621,249 +607,6 @@ def syn_task1(args, writer=None):
         model = model.cuda()
 
     train_node_classifier(G, labels, model, args, writer=writer)
-
-
-def syn_task2(args, writer=None):
-    # data
-    G, labels, name = gengraph.gen_syn2()
-    input_dim = len(G.nodes[0]["feat"])
-    num_classes = max(labels) + 1
-
-    if args.method == "attn":
-        print("Method: attn")
-    else:
-        print("Method:", args.method)
-        model = models.GcnEncoderNode(
-            input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            num_classes,
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-        if args.gpu:
-            model = model.cuda()
-
-    train_node_classifier(G, labels, model, args, writer=writer)
-
-
-def syn_task3(args, writer=None):
-    # data
-    G, labels, name = gengraph.gen_syn3(
-        feature_generator=featgen.ConstFeatureGen(np.ones(args.input_dim, dtype=float))
-    )
-    print(labels)
-    num_classes = max(labels) + 1
-
-    if args.method == "attn":
-        print("Method: attn")
-    else:
-        print("Method:", args.method)
-        model = models.GcnEncoderNode(
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            num_classes,
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-        if args.gpu:
-            model = model.cuda()
-
-    train_node_classifier(G, labels, model, args, writer=writer)
-
-
-def syn_task4(args, writer=None):
-    # data
-    G, labels, name = gengraph.gen_syn4(
-        feature_generator=featgen.ConstFeatureGen(np.ones(args.input_dim, dtype=float))
-    )
-    print(labels)
-    num_classes = max(labels) + 1
-
-    if args.method == "attn":
-        print("Method: attn")
-    else:
-        print("Method:", args.method)
-        model = models.GcnEncoderNode(
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            num_classes,
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-
-        if args.gpu:
-            model = model.cuda()
-
-    train_node_classifier(G, labels, model, args, writer=writer)
-
-
-def syn_task5(args, writer=None):
-    # data
-    G, labels, name = gengraph.gen_syn5(
-        feature_generator=featgen.ConstFeatureGen(np.ones(args.input_dim, dtype=float))
-    )
-    print(labels)
-    print("Number of nodes: ", G.number_of_nodes())
-    num_classes = max(labels) + 1
-
-    if args.method == "attn":
-        print("Method: attn")
-    else:
-        print("Method: base")
-        model = models.GcnEncoderNode(
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            num_classes,
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-
-        if args.gpu:
-            model = model.cuda()
-
-    train_node_classifier(G, labels, model, args, writer=writer)
-
-
-def pkl_task(args, feat=None):
-    with open(os.path.join(args.datadir, args.pkl_fname), "rb") as pkl_file:
-        data = pickle.load(pkl_file)
-    graphs = data[0]
-    labels = data[1]
-    test_graphs = data[2]
-    test_labels = data[3]
-
-    for i in range(len(graphs)):
-        graphs[i].graph["label"] = labels[i]
-    for i in range(len(test_graphs)):
-        test_graphs[i].graph["label"] = test_labels[i]
-
-    if feat is None:
-        featgen_const = featgen.ConstFeatureGen(np.ones(args.input_dim, dtype=float))
-        for G in graphs:
-            featgen_const.gen_node_features(G)
-        for G in test_graphs:
-            featgen_const.gen_node_features(G)
-
-    train_dataset, test_dataset, max_num_nodes = prepare_data(
-        graphs, args, test_graphs=test_graphs
-    )
-    model = models.GcnEncoderGraph(
-        args.input_dim,
-        args.hidden_dim,
-        args.output_dim,
-        args.num_classes,
-        args.num_gc_layers,
-        bn=args.bn,
-    ).cuda()
-    train(train_dataset, model, args, test_dataset=test_dataset)
-    evaluate(test_dataset, model, args, "Validation")
-
-
-def enron_task_multigraph(args, idx=None, writer=None):
-    labels_dict = {
-        "None": 5,
-        "Employee": 0,
-        "Vice President": 1,
-        "Manager": 2,
-        "Trader": 3,
-        "CEO+Managing Director+Director+President": 4,
-    }
-    max_enron_id = 183
-    if idx is None:
-        G_list = []
-        labels_list = []
-        for i in range(10):
-            net = pickle.load(
-                open("data/gnn-explainer-enron/enron_slice_{}.pkl".format(i), "rb")
-            )
-            net.add_nodes_from(range(max_enron_id))
-            labels = [n[1].get("role", "None") for n in net.nodes(data=True)]
-            labels_num = [labels_dict[l] for l in labels]
-            featgen_const = featgen.ConstFeatureGen(
-                np.ones(args.input_dim, dtype=float)
-            )
-            featgen_const.gen_node_features(net)
-            G_list.append(net)
-            labels_list.append(labels_num)
-        # train_dataset, test_dataset, max_num_nodes = prepare_data(G_list, args)
-        model = models.GcnEncoderNode(
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            args.num_classes,
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-        if args.gpu:
-            model = model.cuda()
-        print(labels_num)
-        train_node_classifier_multigraph(
-            G_list, labels_list, model, args, writer=writer
-        )
-    else:
-        print("Running Enron full task")
-
-
-def enron_task(args, idx=None, writer=None):
-    labels_dict = {
-        "None": 5,
-        "Employee": 0,
-        "Vice President": 1,
-        "Manager": 2,
-        "Trader": 3,
-        "CEO+Managing Director+Director+President": 4,
-    }
-    max_enron_id = 183
-    if idx is None:
-        G_list = []
-        labels_list = []
-        for i in range(10):
-            net = pickle.load(
-                open("data/gnn-explainer-enron/enron_slice_{}.pkl".format(i), "rb")
-            )
-            # net.add_nodes_from(range(max_enron_id))
-            # labels=[n[1].get('role', 'None') for n in net.nodes(data=True)]
-            # labels_num = [labels_dict[l] for l in labels]
-            featgen_const = featgen.ConstFeatureGen(
-                np.ones(args.input_dim, dtype=float)
-            )
-            featgen_const.gen_node_features(net)
-            G_list.append(net)
-            print(net.number_of_nodes())
-            # labels_list.append(labels_num)
-
-        G = nx.disjoint_union_all(G_list)
-        model = models.GcnEncoderNode(
-            args.input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            len(labels_dict),
-            args.num_gc_layers,
-            bn=args.bn,
-            args=args,
-        )
-        labels = [n[1].get("role", "None") for n in G.nodes(data=True)]
-        labels_num = [labels_dict[l] for l in labels]
-        for i in range(5):
-            print("Label ", i, ": ", labels_num.count(i))
-
-        print("Total num nodes: ", len(labels_num))
-        print(labels_num)
-
-        if args.gpu:
-            model = model.cuda()
-        train_node_classifier(G, labels_num, model, args, writer=writer)
-    else:
-        print("Running Enron full task")
 
 
 def benchmark_task(args, writer=None, feat="node-label"):
@@ -1145,6 +888,8 @@ def main():
     path = os.path.join(prog_args.logdir, io_utils.gen_prefix(prog_args))
     writer = SummaryWriter(path)
 
+    # io_utils.read_train_test_file(prog_args.datadir, prog_args.bmname)
+
     if prog_args.gpu:
         os.environ["CUDA_VISIBLE_DEVICES"] = prog_args.cuda
         print("CUDA", prog_args.cuda)
@@ -1152,25 +897,13 @@ def main():
         print("Using CPU")
 
     # use --bmname=[dataset_name] for Reddit-Binary, Mutagenicity
-    if prog_args.bmname is not None:
+    if prog_args.link_prediction is True:
+        link_prediction_task(prog_args, writer=writer)
+    elif prog_args.bmname is not None:
         benchmark_task(prog_args, writer=writer)
-    elif prog_args.pkl_fname is not None:
-        pkl_task(prog_args)
     elif prog_args.dataset is not None:
         if prog_args.dataset == "syn1":
             syn_task1(prog_args, writer=writer)
-        elif prog_args.dataset == "syn2":
-            syn_task2(prog_args, writer=writer)
-        elif prog_args.dataset == "syn3":
-            syn_task3(prog_args, writer=writer)
-        elif prog_args.dataset == "syn4":
-            syn_task4(prog_args, writer=writer)
-        elif prog_args.dataset == "syn5":
-            syn_task5(prog_args, writer=writer)
-        elif prog_args.dataset == "enron":
-            enron_task(prog_args, writer=writer)
-        elif prog_args.dataset == "ppi_essential":
-            ppi_essential_task(prog_args, writer=writer)
 
     writer.close()
 
