@@ -25,6 +25,7 @@ import cv2
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+import random
 
 # Only necessary to rebuild the Chemistry example
 # from rdkit import Chem
@@ -427,8 +428,8 @@ def numpy_to_torch(img, requires_grad=True):
 
 def attribute2vec(attrs):
     list = []
-    for i  in range(len(attrs)):
-        list.append(i)
+    for i in range(len(attrs)):
+        list.append(i + random.random())
     return np.array(list)
 
 

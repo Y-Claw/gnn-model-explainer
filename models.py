@@ -358,9 +358,10 @@ class GcnEncoderNode(GcnEncoderGraph):
             print("Loss weight: ", args.loss_weight)
             self.celoss = nn.CrossEntropyLoss(weight=args.loss_weight)
         else:
-            self.celoss = nn.CrossEntropyLoss()
+            # self.celoss = nn.CrossEntropyLoss()
+            self.bceloss = nn.BCELoss()
 
-    def forward(self, x, adj, batch_num_nodes=None, **kwargs):
+    def forward(self, x, adj, train_edges, x2=None, adj2=None, batch_num_nodes=None, **kwargs):
         # mask
         max_num_nodes = adj.size()[1]
         if batch_num_nodes is not None:
@@ -372,12 +373,37 @@ class GcnEncoderNode(GcnEncoderGraph):
         self.embedding_tensor, adj_att = self.gcn_forward(
             x, adj, self.conv_first, self.conv_block, self.conv_last, embedding_mask
         )
-        pred = self.pred_model(self.embedding_tensor)
-        return pred, adj_att
+        # pred = self.pred_model(self.embedding_tensor)
+        # return pred, adj_att
+
+        if x2 is None and adj2 is None:                                         # for training the model
+            node_embeddings = self.embedding_tensor.data.numpy()[0]
+            src_idx = train_edges[:, 0]
+            dst_idx = train_edges[:, 1]
+            src_embeddings = node_embeddings[src_idx]
+            dst_embeddings = node_embeddings[dst_idx]
+            link_embeddings = (src_embeddings + dst_embeddings) / 2
+            # link_embeddings = src_embeddings * dst_embeddings
+            link_embeddings = np.expand_dims(link_embeddings, axis=0)
+            link_embeddings = torch.tensor(link_embeddings, requires_grad=True, dtype=torch.float)
+            pred = self.pred_model(link_embeddings)
+            pred = torch.sigmoid(pred)
+            return pred, adj_att
+        else:                                                                   # for explaining a pair of nodes
+            embedding_tensor2, adj_att2 = self.gcn_forward(
+                x2, adj2, self.conv_first, self.conv_block, self.conv_last, embedding_mask
+            )
+            link_embeddings = (self.embedding_tensor + embedding_tensor2) / 2
+            link_embeddings = np.expand_dims(link_embeddings, axis=0)
+            link_embeddings = torch.tensor(link_embeddings, dtype=torch.float)
+            pred = self.pred_model(link_embeddings)
+            return pred, adj_att, adj_att2
 
     def loss(self, pred, label):
-        pred = torch.transpose(pred, 1, 2)
-        return self.celoss(pred, label)
+        # pred = torch.transpose(pred, 1, 2)
+        # return self.celoss(pred, label)
+        return self.bceloss(pred, label.float())
+        # return F.binary_cross_entropy(torch.sigmoid(pred), label.float())
 
 
 class SoftPoolingGcnEncoder(GcnEncoderGraph):
