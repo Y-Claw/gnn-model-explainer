@@ -45,9 +45,13 @@ class Explainer:
         model,
         adj,
         feat,
-        label,
-        pred,
+        node_labels,
+        train_labels,
+        test_labels,
+        pred_train,
+        pred_test,
         train_idx,
+        test_idx,
         args,
         writer=None,
         print_training=True,
@@ -58,9 +62,13 @@ class Explainer:
         self.model.eval()
         self.adj = adj
         self.feat = feat
-        self.label = label
-        self.pred = pred
+        self.node_labels = node_labels
+        self.train_labels = train_labels
+        self.test_labels = test_labels
+        self.pred_train = pred_train
+        self.pred_test = pred_test
         self.train_idx = train_idx
+        self.test_idx = test_idx
         self.n_hops = args.num_gc_layers
         self.graph_mode = graph_mode
         self.graph_idx = graph_idx
@@ -69,47 +77,70 @@ class Explainer:
         self.writer = writer
         self.print_training = print_training
 
-    
-    # Main method
-    def explain(
-        self, node_idx, graph_idx=0, graph_mode=False, unconstrained=False, model="exp"
-    ):
-        """Explain a single node prediction
+    def extract_neighborhood_in_directed_graph(self, node_idx, graph_idx=0):
+        """Returns the neighborhood of a given ndoe."""
+        neighbors_adj_row = self.neighborhoods[graph_idx][node_idx, :]          # in-edges
+        neighbors_adj_column = self.neighborhoods[graph_idx][:, node_idx]       # out-edges
+        n1 = np.nonzero(neighbors_adj_row)[0]
+        n2 = np.nonzero(neighbors_adj_column)[0]
+        neighbors = np.concatenate((n1, n2))
+        neighbors = np.insert(neighbors, 0, node_idx)
+        neighbors = np.unique(neighbors)
+
+        node_idx_new = np.where(neighbors == node_idx)[0][0]
+        sub_adj = self.adj[graph_idx][neighbors][:, neighbors]
+        sub_feat = self.feat[graph_idx, neighbors]
+        sub_node_label = self.node_labels[:, neighbors]
+
+        return node_idx_new, sub_adj, sub_feat, sub_node_label, neighbors
+
+
+    def explain_link(self, args, unconstrained=False, model="exp"):
+        """Explain link prediction for a single node pair
         """
-        # index of the query node in the new adj
-        if graph_mode:
-            node_idx_new = node_idx
-            sub_adj = self.adj[graph_idx]
-            sub_feat = self.feat[graph_idx, :]
-            sub_label = self.label[graph_idx]
-            neighbors = np.asarray(range(self.adj.shape[0]))
-        else:
-            print("node label: ", self.label[graph_idx][node_idx])
-            node_idx_new, sub_adj, sub_feat, sub_label, neighbors = self.extract_neighborhood(
-                node_idx, graph_idx
-            )
-            print("neigh graph idx: ", node_idx, node_idx_new)
-            sub_label = np.expand_dims(sub_label, axis=0)
-        
-        sub_adj = np.expand_dims(sub_adj, axis=0)
-        sub_feat = np.expand_dims(sub_feat, axis=0)
+        index = 0
+        src_idx = self.train_idx[index][0]
+        dst_idx = self.train_idx[index][1]
+        link_label = self.train_labels[0][index]
+        print("src node label: ", self.node_labels[0][src_idx])
+        print("dst node label: ", self.node_labels[0][dst_idx])
+        src_idx_new, src_adj, src_sub_feat, src_sub_label, src_neighbors = self.extract_neighborhood_in_directed_graph(
+            src_idx
+        )
+        dst_idx_new, dst_adj, dst_sub_feat, dst_sub_label, dst_neighbors = self.extract_neighborhood_in_directed_graph(
+            dst_idx
+        )
+        src_adj = np.expand_dims(src_adj, axis=0)
+        dst_adj = np.expand_dims(dst_adj, axis=0)
+        src_sub_feat = np.expand_dims(src_sub_feat, axis=0)
+        dst_sub_feat = np.expand_dims(dst_sub_feat, axis=0)
 
-        adj   = torch.tensor(sub_adj, dtype=torch.float)
-        x     = torch.tensor(sub_feat, requires_grad=True, dtype=torch.float)
-        label = torch.tensor(sub_label, dtype=torch.long)
+        src_adj = torch.tensor(src_adj, dtype=torch.float)
+        src_x = torch.tensor(src_sub_feat, requires_grad=True, dtype=torch.float)
 
-        if self.graph_mode:
-            pred_label = np.argmax(self.pred[0][graph_idx], axis=0)
-            print("Graph predicted label: ", pred_label)
-        else:
-            pred_label = np.argmax(self.pred[graph_idx][neighbors], axis=1)
-            print("Node predicted label: ", pred_label[node_idx_new])
+        dst_adj = torch.tensor(dst_adj, dtype=torch.float)
+        dst_x = torch.tensor(dst_sub_feat, requires_grad=True, dtype=torch.float)
+
+        link_label = link_label.tolist()
+        link_label = np.expand_dims(link_label, axis=0)
+        link_label = torch.tensor(link_label, dtype=torch.long)
+        print("link label:", link_label)
+
+        pred_label = self.pred_train[:, index]
+        pred_label[pred_label < 0.5] = 0
+        pred_label[pred_label >= 0.5] = 1
+        pred_label = torch.tensor(pred_label, dtype=torch.long)
+        print("link predicted label: ", pred_label)
 
         explainer = ExplainModule(
-            adj=adj,
-            x=x,
+            src_adj=src_adj,
+            dst_adj=dst_adj,
+            src_x=src_x,
+            dst_x=dst_x,
+            src_idx_new=src_idx_new,
+            dst_idx_new=dst_idx_new,
             model=self.model,
-            label=label,
+            link_label=link_label,
             args=self.args,
             writer=self.writer,
             graph_idx=self.graph_idx,
@@ -120,105 +151,100 @@ class Explainer:
 
         self.model.eval()
 
-
-        # gradient baseline
-        if model == "grad":
+        explainer.train()
+        begin_time = time.time()
+        for epoch in range(self.args.num_epochs):
             explainer.zero_grad()
-            # pdb.set_trace()
-            adj_grad = torch.abs(
-                explainer.adj_feat_grad(node_idx_new, pred_label[node_idx_new])[0]
-            )[graph_idx]
-            masked_adj = adj_grad + adj_grad.t()
-            masked_adj = nn.functional.sigmoid(masked_adj)
-            masked_adj = masked_adj.cpu().detach().numpy() * sub_adj.squeeze()
-        else:
-            explainer.train()
-            begin_time = time.time()
-            for epoch in range(self.args.num_epochs):
-                explainer.zero_grad()
-                explainer.optimizer.zero_grad()
-                ypred, adj_atts = explainer(node_idx_new, unconstrained=unconstrained)
-                loss = explainer.loss(ypred, pred_label, node_idx_new, epoch)
-                loss.backward()
+            explainer.optimizer.zero_grad()
+            ypred, src_adj_atts, dst_adj_atts = explainer(unconstrained=unconstrained)
+            loss = explainer.loss(ypred, pred_label, epoch)
+            loss.backward()
 
-                explainer.optimizer.step()
-                if explainer.scheduler is not None:
-                    explainer.scheduler.step()
+            explainer.optimizer.step()
+            if explainer.scheduler is not None:
+                explainer.scheduler.step()
 
-                mask_density = explainer.mask_density()
-                if self.print_training:
-                    print(
-                        "epoch: ",
-                        epoch,
-                        "; loss: ",
-                        loss.item(),
-                        "; mask density: ",
-                        mask_density.item(),
-                        "; pred: ",
-                        ypred,
-                    )
-                single_subgraph_label = sub_label.squeeze()
+            src_mask_density, dst_mask_density = explainer.mask_density()
+            if self.print_training:
+                print(
+                    "epoch: ",
+                    epoch,
+                    "; loss: ",
+                    loss.item(),
+                    "; src mask density: ",
+                    src_mask_density.item(),
+                    "; dst mask density: ",
+                    dst_mask_density.item(),
+                    "; pred: ",
+                    ypred,
+                )
+            # single_subgraph_label = sub_label.squeeze()
 
-                if self.writer is not None:
-                    self.writer.add_scalar("mask/density", mask_density, epoch)
+            if self.writer is not None:
+                    self.writer.add_scalar("mask/src_density", src_mask_density, epoch)
+                    self.writer.add_scalar("mask/dst_density", dst_mask_density, epoch)
                     self.writer.add_scalar(
                         "optimization/lr",
                         explainer.optimizer.param_groups[0]["lr"],
                         epoch,
                     )
-                    if epoch % 25 == 0:
-                        explainer.log_mask(epoch)
-                        explainer.log_masked_adj(
-                            node_idx_new, epoch, label=single_subgraph_label
-                        )
-                        explainer.log_adj_grad(
-                            node_idx_new, pred_label, epoch, label=single_subgraph_label
-                        )
+                    # if epoch % 25 == 0:
+                    #     explainer.log_mask(epoch)
+                    #     explainer.log_masked_adj(
+                    #         node_idx_new, epoch, label=single_subgraph_label
+                    #     )
+                    #     explainer.log_adj_grad(
+                    #         node_idx_new, pred_label, epoch, label=single_subgraph_label
+                    #     )
 
-                    if epoch == 0:
-                        if self.model.att:
-                            # explain node
-                            print("adj att size: ", adj_atts.size())
-                            adj_att = torch.sum(adj_atts[0], dim=2)
-                            # adj_att = adj_att[neighbors][:, neighbors]
-                            node_adj_att = adj_att * adj.float().cuda()
-                            io_utils.log_matrix(
-                                self.writer, node_adj_att[0], "att/matrix", epoch
-                            )
-                            node_adj_att = node_adj_att[0].cpu().detach().numpy()
-                            G = io_utils.denoise_graph(
-                                node_adj_att,
-                                node_idx_new,
-                                threshold=3.8,  # threshold_num=20,
-                                max_component=True,
-                            )
-                            io_utils.log_graph(
-                                self.writer,
-                                G,
-                                name="att/graph",
-                                identify_self=not self.graph_mode,
-                                nodecolor="label",
-                                edge_vmax=None,
-                                args=self.args,
-                            )
-                if model != "exp":
-                    break
+                    # if epoch == 0:
+                    #     if self.model.att:
+                    #         # explain node
+                    #         print("adj att size: ", adj_atts.size())
+                    #         adj_att = torch.sum(adj_atts[0], dim=2)
+                    #         # adj_att = adj_att[neighbors][:, neighbors]
+                    #         node_adj_att = adj_att * adj.float().cuda()
+                    #         io_utils.log_matrix(
+                    #             self.writer, node_adj_att[0], "att/matrix", epoch
+                    #         )
+                    #         node_adj_att = node_adj_att[0].cpu().detach().numpy()
+                    #         G = io_utils.denoise_graph(
+                    #             node_adj_att,
+                    #             node_idx_new,
+                    #             threshold=3.8,  # threshold_num=20,
+                    #             max_component=True,
+                    #         )
+                    #         io_utils.log_graph(
+                    #             self.writer,
+                    #             G,
+                    #             name="att/graph",
+                    #             identify_self=not self.graph_mode,
+                    #             nodecolor="label",
+                    #             edge_vmax=None,
+                    #             args=self.args,
+                    #         )
+            if model != "exp":
+                break
 
-            print("finished training in ", time.time() - begin_time)
-            if model == "exp":
-                masked_adj = (
-                    explainer.masked_adj[0].cpu().detach().numpy() * sub_adj.squeeze()
-                )
-            else:
-                adj_atts = nn.functional.sigmoid(adj_atts).squeeze()
-                masked_adj = adj_atts.cpu().detach().numpy() * sub_adj.squeeze()
-
+        print("finished training in ", time.time() - begin_time)
+        if model == "exp":
+            src_masked_adj = (
+                explainer.src_masked_adj[0].cpu().detach().numpy() * src_adj[0].cpu().detach().numpy()
+            )
+            dst_masked_adj = (
+                    explainer.dst_masked_adj[0].cpu().detach().numpy() * dst_adj[0].cpu().detach().numpy()
+            )
+        # else:
+        #     adj_atts = nn.functional.sigmoid(adj_atts).squeeze()
+        #     masked_adj = adj_atts.cpu().detach().numpy() * sub_adj.squeeze()
+        #
         fname = 'masked_adj_' + io_utils.gen_explainer_prefix(self.args) + (
-                'node_idx_'+str(node_idx)+'graph_idx_'+str(self.graph_idx)+'.npy')
+                'src_idx_'+str(src_idx)+'dst_idx_'+str(dst_idx)+'graph_idx_'+str(self.graph_idx)+'.npy')
         with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
-            np.save(outfile, np.asarray(masked_adj.copy()))
+            np.save(outfile, np.asarray(src_masked_adj.copy()))
+            np.save(outfile, np.asarray(dst_masked_adj.copy()))
             print("Saved adjacency matrix to ", fname)
-        return masked_adj
+        return src_masked_adj, dst_masked_adj
 
 
     # NODE EXPLAINER
@@ -290,7 +316,6 @@ class Explainer:
         #        'align/aligned', epoch=1)
 
         return masked_adjs
-
 
     def explain_nodes_gnn_stats(self, node_indices, args, graph_idx=0, model="exp"):
         masked_adjs = [
@@ -579,10 +604,14 @@ class Explainer:
 class ExplainModule(nn.Module):
     def __init__(
         self,
-        adj,
-        x,
+        src_adj,
+        dst_adj,
+        src_x,
+        dst_x,
+        src_idx_new,
+        dst_idx_new,
         model,
-        label,
+        link_label,
         args,
         graph_idx=0,
         writer=None,
@@ -590,10 +619,14 @@ class ExplainModule(nn.Module):
         graph_mode=False,
     ):
         super(ExplainModule, self).__init__()
-        self.adj = adj
-        self.x = x
+        self.src_adj = src_adj
+        self.dst_adj = dst_adj
+        self.src_x = src_x
+        self.dst_x = dst_x
+        self.src_idx_new=src_idx_new
+        self.dst_idx_new=dst_idx_new
         self.model = model
-        self.label = label
+        self.link_label = link_label
         self.graph_idx = graph_idx
         self.args = args
         self.writer = writer
@@ -602,19 +635,29 @@ class ExplainModule(nn.Module):
         self.graph_mode = graph_mode
 
         init_strategy = "normal"
-        num_nodes = adj.size()[1]
-        self.mask, self.mask_bias = self.construct_edge_mask(
-            num_nodes, init_strategy=init_strategy
+        src_num_nodes = src_adj.size()[1]
+        dst_num_nodes = dst_adj.size()[1]
+        self.src_mask, self.src_mask_bias = self.construct_edge_mask(
+            src_num_nodes, init_strategy=init_strategy
+        )
+        self.dst_mask, self.dst_mask_bias = self.construct_edge_mask(
+            dst_num_nodes, init_strategy=init_strategy
         )
 
-        self.feat_mask = self.construct_feat_mask(x.size(-1), init_strategy="constant")
-        params = [self.mask, self.feat_mask]
-        if self.mask_bias is not None:
-            params.append(self.mask_bias)
+        self.src_feat_mask = self.construct_feat_mask(src_x.size(-1), init_strategy="constant")
+        self.dst_feat_mask = self.construct_feat_mask(dst_x.size(-1), init_strategy="constant")
+
+        params = [self.src_mask, self.src_feat_mask, self.dst_mask, self.dst_feat_mask]
+        if self.src_mask_bias is not None:
+            params.append(self.src_mask_bias)
+        if self.dst_mask_bias is not None:
+            params.append(self.dst_mask_bias)
         # For masking diagonal entries
-        self.diag_mask = torch.ones(num_nodes, num_nodes) - torch.eye(num_nodes)
+        self.src_diag_mask = torch.ones(src_num_nodes, src_num_nodes) - torch.eye(src_num_nodes)
+        self.dst_diag_mask = torch.ones(dst_num_nodes, dst_num_nodes) - torch.eye(dst_num_nodes)
         if args.gpu:
-            self.diag_mask = self.diag_mask.cuda()
+            self.src_diag_mask = self.src_diag_mask.cuda()
+            self.dst_diag_mask = self.dst_diag_mask.cuda()
 
         self.scheduler, self.optimizer = train_utils.build_optimizer(args, params)
 
@@ -660,27 +703,40 @@ class ExplainModule(nn.Module):
         return mask, mask_bias
 
     def _masked_adj(self):
-        sym_mask = self.mask
+        src_sym_mask = self.src_mask
+        dst_sym_mask = self.dst_mask
         if self.mask_act == "sigmoid":
-            sym_mask = torch.sigmoid(self.mask)
+            src_sym_mask = torch.sigmoid(self.src_mask)
+            dst_sym_mask = torch.sigmoid(self.dst_mask)
         elif self.mask_act == "ReLU":
-            sym_mask = nn.ReLU()(self.mask)
-        sym_mask = (sym_mask + sym_mask.t()) / 2
-        adj = self.adj.cuda() if self.args.gpu else self.adj
-        masked_adj = adj * sym_mask
+            src_sym_mask = nn.ReLU()(self.src_mask)
+            dst_sym_mask = nn.ReLU()(self.dst_mask)
+        src_sym_mask = (src_sym_mask + src_sym_mask.t()) / 2
+        dst_sym_mask = (dst_sym_mask + dst_sym_mask.t()) / 2
+        src_adj = self.src_adj.cuda() if self.args.gpu else self.src_adj
+        dst_adj = self.dst_adj.cuda() if self.args.gpu else self.dst_adj
+        src_masked_adj = src_adj * src_sym_mask
+        dst_masked_adj = dst_adj * dst_sym_mask
         if self.args.mask_bias:
-            bias = (self.mask_bias + self.mask_bias.t()) / 2
-            bias = nn.ReLU6()(bias * 6) / 6
-            masked_adj += (bias + bias.t()) / 2
-        return masked_adj * self.diag_mask
+            src_bias = (self.src_mask_bias + self.src_mask_bias.t()) / 2
+            dst_bias = (self.dst_mask_bias + self.dst_mask_bias.t()) / 2
+            src_bias = nn.ReLU6()(src_bias * 6) / 6
+            dst_bias = nn.ReLU6()(dst_bias * 6) / 6
+            src_masked_adj += (src_bias + src_bias.t()) / 2
+            dst_masked_adj += (dst_bias + dst_bias.t()) / 2
+        return src_masked_adj * self.src_diag_mask, dst_masked_adj * self.dst_diag_mask
 
     def mask_density(self):
-        mask_sum = torch.sum(self._masked_adj()).cpu()
-        adj_sum = torch.sum(self.adj)
-        return mask_sum / adj_sum
+        src_masked_adj, dst_masked_adj = self._masked_adj()
+        src_mask_sum = torch.sum(src_masked_adj).cpu()
+        dst_mask_sum = torch.sum(dst_masked_adj).cpu()
+        src_adj_sum = torch.sum(self.src_adj)
+        dst_adj_sum = torch.sum(self.dst_adj)
+        return src_mask_sum / src_adj_sum, dst_mask_sum / dst_adj_sum
 
-    def forward(self, node_idx, unconstrained=False, mask_features=True, marginalize=False):
-        x = self.x.cuda() if self.args.gpu else self.x
+    def forward(self, unconstrained=False, mask_features=True, marginalize=False):
+        src_x = self.src_x.cuda() if self.args.gpu else self.src_x
+        dst_x = self.dst_x.cuda() if self.args.gpu else self.dst_x
 
         if unconstrained:
             sym_mask = torch.sigmoid(self.mask) if self.use_sigmoid else self.mask
@@ -688,28 +744,38 @@ class ExplainModule(nn.Module):
                 torch.unsqueeze((sym_mask + sym_mask.t()) / 2, 0) * self.diag_mask
             )
         else:
-            self.masked_adj = self._masked_adj()
+            self.src_masked_adj, self.dst_masked_adj = self._masked_adj()
             if mask_features:
-                feat_mask = (
-                    torch.sigmoid(self.feat_mask)
+                src_feat_mask = (
+                    torch.sigmoid(self.src_feat_mask)
                     if self.use_sigmoid
-                    else self.feat_mask
+                    else self.src_feat_mask
+                )
+                dst_feat_mask = (
+                    torch.sigmoid(self.dst_feat_mask)
+                    if self.use_sigmoid
+                    else self.dst_feat_mask
                 )
                 if marginalize:
-                    std_tensor = torch.ones_like(x, dtype=torch.float) / 2
-                    mean_tensor = torch.zeros_like(x, dtype=torch.float) - x
-                    z = torch.normal(mean=mean_tensor, std=std_tensor)
-                    x = x + z * (1 - feat_mask)
+                    src_std_tensor = torch.ones_like(src_x, dtype=torch.float) / 2
+                    src_mean_tensor = torch.zeros_like(src_x, dtype=torch.float) - src_x
+                    src_z = torch.normal(mean=src_mean_tensor, std=src_std_tensor)
+                    src_x = src_x + src_z * (1 - src_feat_mask)
+                    dst_std_tensor = torch.ones_like(dst_x, dtype=torch.float) / 2
+                    dst_mean_tensor = torch.zeros_like(dst_x, dtype=torch.float) - dst_x
+                    dst_z = torch.normal(mean=dst_mean_tensor, std=dst_std_tensor)
+                    dst_x = dst_x + dst_z * (1 - dst_feat_mask)
                 else:
-                    x = x * feat_mask
+                    src_x = src_x * src_feat_mask
+                    dst_x = dst_x * dst_feat_mask
 
-        ypred, adj_att = self.model(x, self.masked_adj)
-        if self.graph_mode:
-            res = nn.Softmax(dim=0)(ypred[0])
-        else:
-            node_pred = ypred[self.graph_idx, node_idx, :]
-            res = nn.Softmax(dim=0)(node_pred)
-        return res, adj_att
+        ypred, src_adj_att, dst_adj_att = self.model(src_x, self.src_masked_adj, [self.src_idx_new, self.dst_idx_new], dst_x, self.dst_masked_adj)
+        # if self.graph_mode:
+        #     res = nn.Softmax(dim=0)(ypred[0])
+        # else:
+        #     node_pred = ypred[self.graph_idx, node_idx, :]
+        #     res = nn.Softmax(dim=0)(node_pred)
+        return ypred, src_adj_att, dst_adj_att
 
     def adj_feat_grad(self, node_idx, pred_label_node):
         self.model.zero_grad()
@@ -734,7 +800,7 @@ class ExplainModule(nn.Module):
         loss.backward()
         return self.adj.grad, self.x.grad
 
-    def loss(self, pred, pred_label, node_idx, epoch):
+    def loss(self, pred, pred_label, epoch):
         """
         Args:
             pred: prediction made by current model
@@ -744,51 +810,80 @@ class ExplainModule(nn.Module):
         if mi_obj:
             pred_loss = -torch.sum(pred * torch.log(pred))
         else:
-            pred_label_node = pred_label if self.graph_mode else pred_label[node_idx]
-            gt_label_node = self.label if self.graph_mode else self.label[0][node_idx]
-            logit = pred[gt_label_node]
-            pred_loss = -torch.log(logit)
+            # pred_label_node = pred_label if self.graph_mode else pred_label[node_idx]
+            # gt_label_node = self.label if self.graph_mode else self.label[0][node_idx]
+            # logit = pred[gt_label_node]
+            # pred_loss = -torch.log(logit)
+            pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())
         # size
-        mask = self.mask
+        src_mask = self.src_mask
+        dst_mask = self.dst_mask
         if self.mask_act == "sigmoid":
-            mask = torch.sigmoid(self.mask)
+            src_mask = torch.sigmoid(self.src_mask)
+            dst_mask = torch.sigmoid(self.dst_mask)
         elif self.mask_act == "ReLU":
-            mask = nn.ReLU()(self.mask)
-        size_loss = self.coeffs["size"] * torch.sum(mask)
+            src_mask = nn.ReLU()(self.src_mask)
+            dst_mask = nn.ReLU()(self.dst_mask)
+        src_size_loss = self.coeffs["size"] * torch.sum(src_mask)
+        dst_size_loss = self.coeffs["size"] * torch.sum(dst_mask)
+        size_loss = src_size_loss + dst_size_loss
 
         # pre_mask_sum = torch.sum(self.feat_mask)
-        feat_mask = (
-            torch.sigmoid(self.feat_mask) if self.use_sigmoid else self.feat_mask
+        src_feat_mask = (
+            torch.sigmoid(self.src_feat_mask) if self.use_sigmoid else self.src_feat_mask
         )
-        feat_size_loss = self.coeffs["feat_size"] * torch.mean(feat_mask)
+        dst_feat_mask = (
+            torch.sigmoid(self.dst_feat_mask) if self.use_sigmoid else self.dst_feat_mask
+        )
+        src_feat_size_loss = self.coeffs["feat_size"] * torch.mean(src_feat_mask)
+        dst_feat_size_loss = self.coeffs["feat_size"] * torch.mean(dst_feat_mask)
+        feat_size_loss = src_feat_size_loss + dst_feat_size_loss
 
         # entropy
-        mask_ent = -mask * torch.log(mask) - (1 - mask) * torch.log(1 - mask)
-        mask_ent_loss = self.coeffs["ent"] * torch.mean(mask_ent)
+        src_mask_ent = -src_mask * torch.log(src_mask) - (1 - src_mask) * torch.log(1 - src_mask)
+        dst_mask_ent = -dst_mask * torch.log(dst_mask) - (1 - dst_mask) * torch.log(1 - dst_mask)
+        src_mask_ent_loss = self.coeffs["ent"] * torch.mean(src_mask_ent)
+        dst_mask_ent_loss = self.coeffs["ent"] * torch.mean(dst_mask_ent)
+        mask_ent_loss = src_mask_ent_loss + dst_mask_ent_loss
 
-        feat_mask_ent = - feat_mask             \
-                        * torch.log(feat_mask)  \
-                        - (1 - feat_mask)       \
-                        * torch.log(1 - feat_mask)
+        src_feat_mask_ent = - src_feat_mask             \
+                            * torch.log(src_feat_mask)  \
+                            - (1 - src_feat_mask)       \
+                            * torch.log(1 - src_feat_mask)
+        dst_feat_mask_ent = - dst_feat_mask \
+                            * torch.log(dst_feat_mask) \
+                            - (1 - dst_feat_mask) \
+                            * torch.log(1 - dst_feat_mask)
 
-        feat_mask_ent_loss = self.coeffs["feat_ent"] * torch.mean(feat_mask_ent)
+        src_feat_mask_ent_loss = self.coeffs["feat_ent"] * torch.mean(src_feat_mask_ent)
+        dst_feat_mask_ent_loss = self.coeffs["feat_ent"] * torch.mean(dst_feat_mask_ent)
+        feat_mask_ent_loss = src_feat_mask_ent_loss + dst_feat_mask_ent_loss
 
         # laplacian
-        D = torch.diag(torch.sum(self.masked_adj[0], 0))
-        m_adj = self.masked_adj if self.graph_mode else self.masked_adj[self.graph_idx]
-        L = D - m_adj
+        src_D = torch.diag(torch.sum(self.src_masked_adj[0], 0))
+        src_m_adj = self.src_masked_adj if self.graph_mode else self.src_masked_adj[self.graph_idx]
+        src_L = src_D - src_m_adj
+        dst_D = torch.diag(torch.sum(self.dst_masked_adj[0], 0))
+        dst_m_adj = self.dst_masked_adj if self.graph_mode else self.dst_masked_adj[self.graph_idx]
+        dst_L = dst_D - dst_m_adj
         pred_label_t = torch.tensor(pred_label, dtype=torch.float)
         if self.args.gpu:
             pred_label_t = pred_label_t.cuda()
-            L = L.cuda()
+            src_L = src_L.cuda()
+            dst_L = dst_L.cuda()
         if self.graph_mode:
             lap_loss = 0
         else:
-            lap_loss = (self.coeffs["lap"]
-                * (pred_label_t @ L @ pred_label_t)
-                / self.adj.numel()
-            )
-
+            # src_lap_loss = (self.coeffs["lap"]
+            #     * (pred_label_t @ src_L @ pred_label_t)
+            #     / self.src_adj.numel()
+            # )
+            # dst_lap_loss = (self.coeffs["lap"]
+            #     * (pred_label_t @ dst_L @ pred_label_t)
+            #     / self.dst_adj.numel()
+            # )
+            # lap_loss = src_lap_loss + dst_lap_loss
+            lap_loss = 0
         # grad
         # adj
         # adj_grad, x_grad = self.adj_feat_grad(node_idx, pred_label_node)

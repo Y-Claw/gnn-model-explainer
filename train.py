@@ -161,7 +161,7 @@ def prepare_data(graph, edge_labels, args, test_graphs=None):
 #
 #############################
 
-def train_link_classifier(G, train_data, train_labels, test_data, test_labels, model, args, writer=None):
+def train_link_classifier(G, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=None):
     # for p in model.parameters():
     #     if p.grad is not None:
     #         print(p.grad.data)
@@ -201,20 +201,13 @@ def train_link_classifier(G, train_data, train_labels, test_data, test_labels, m
         model.zero_grad()
 
         ypred_train, adj_att = model(x, adj, train_data)
-        # temp = ypred_train.detach().numpy()[0]
-        # temp = temp[:train_labels.shape[1]]
-        # temp = np.expand_dims(temp, axis=0)
-        # temp = torch.tensor(temp, requires_grad=True, dtype=torch.float)
-        # temp2 = train_labels.numpy()[0]
-        # temp2 = temp2[:, 2:3]
-        # temp2 = temp2.squeeze()
-        # temp2 = np.expand_dims(temp2, axis=0)
-        # temp2 = torch.tensor(temp2, dtype=torch.long)
-        # loss = model.loss(temp, temp2)
         loss = model.loss(ypred_train, train_labels)
 
         loss.backward()
-        # nn.utils.clip_grad_norm_(model.parameters(), args.clip)
+        # for param in model.parameters():
+        #     print(param.grad)
+
+        nn.utils.clip_grad_norm_(model.parameters(), args.clip)
 
         optimizer.step()
 
@@ -263,10 +256,11 @@ def train_link_classifier(G, train_data, train_labels, test_data, test_labels, m
     ypred_train, _ = model(x, adj, train_data)
     ypred_test, _ = model(x, adj, test_data)
     cg_data = {
-        "adj": adj,
-        "feat": x,
-        "label_train": train_labels,
-        "label_test": test_labels,
+        "adj": adj.numpy(),
+        "feat": x.detach().numpy(),
+        "node_labels": np.expand_dims(node_labels, axis=0),
+        "label_train": train_labels.numpy(),
+        "label_test": np.expand_dims(test_labels, axis=0),
         "pred_train": ypred_train.cpu().detach().numpy(),
         "pred_test": ypred_test.cpu().detach().numpy(),
         "train_idx": train_data,
@@ -284,14 +278,17 @@ def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labe
     test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
     ypred_test, adj_att = model(x, adj, test_data)
-    # loss = model.loss(ypred_test, test_labels)
 
     ypred_train = ypred_train.detach().numpy()[0]
     ypred_train[ypred_train < 0.5] = 0
     ypred_train[ypred_train >= 0.5] = 1
+    ypred_train = ypred_train.astype(int)
+
     ypred_test = ypred_test.detach().numpy()[0]
     ypred_test[ypred_test < 0.5] = 0
     ypred_test[ypred_test >= 0.5] = 1
+    ypred_test = ypred_test.astype(int)
+
     train_labels = train_labels.numpy()[0]
     test_labels = test_labels.numpy()[0]
 
@@ -309,7 +306,7 @@ def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labe
 
 
 def link_prediction_task(args, writer=None):
-    graph, edge_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
+    graph, node_labels, edge_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
         args.datadir, args.dataset
     )
     input_dim = graph.graph["feat_dim"]
@@ -327,7 +324,7 @@ def link_prediction_task(args, writer=None):
         args=args,
     )
 
-    train_link_classifier(graph, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
+    train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
 
 
 def main():

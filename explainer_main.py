@@ -139,11 +139,15 @@ def arg_parse():
         help="suffix added to the explainer log",
     )
 
+    parser.add_argument('--link_prediction', dest='link_prediction',
+                        help='whether do link prediction task')
+
     # TODO: Check argument usage
     parser.set_defaults(
         logdir="log",
         ckptdir="ckpt",
-        dataset="syn1",
+        dataset="AIDS",
+        link_prediction=True,
         opt="adam",  
         opt_scheduler="none",
         cuda="0",
@@ -193,34 +197,13 @@ def main():
     ckpt = io_utils.load_ckpt(prog_args)
     cg_dict = ckpt["cg"] # get computation graph
     input_dim = cg_dict["feat"].shape[2] 
-    num_classes = cg_dict["pred"].shape[2]
+    num_classes = cg_dict["pred_train"].shape[2]
     print("Loaded model from {}".format(prog_args.ckptdir))
     print("input dim: ", input_dim, "; num classes: ", num_classes)
 
-    # Determine explainer mode
-    graph_mode = (
-        prog_args.graph_mode
-        or prog_args.multigraph_class >= 0
-        or prog_args.graph_idx >= 0
-    )
-
     # build model
     print("Method: ", prog_args.method)
-    if graph_mode: 
-        # Explain Graph prediction
-        model = models.GcnEncoderGraph(
-            input_dim=input_dim,
-            hidden_dim=prog_args.hidden_dim,
-            embedding_dim=prog_args.output_dim,
-            label_dim=num_classes,
-            num_layers=prog_args.num_gc_layers,
-            bn=prog_args.bn,
-            args=prog_args,
-        )
-    else:
-        if prog_args.dataset == "ppi_essential":
-            # class weight in CE loss for handling imbalanced label classes
-            prog_args.loss_weight = torch.tensor([1.0, 5.0], dtype=torch.float).cuda() 
+    if prog_args.link_prediction == True:
         # Explain Node prediction
         model = models.GcnEncoderNode(
             input_dim=input_dim,
@@ -241,56 +224,32 @@ def main():
         model=model,
         adj=cg_dict["adj"],
         feat=cg_dict["feat"],
-        label=cg_dict["label"],
-        pred=cg_dict["pred"],
+        node_labels=cg_dict["node_labels"],
+        train_labels=cg_dict["label_train"],
+        test_labels=cg_dict["label_test"],
+        pred_train=cg_dict["pred_train"],
+        pred_test=cg_dict["pred_test"],
         train_idx=cg_dict["train_idx"],
+        test_idx=cg_dict["test_idx"],
         args=prog_args,
         writer=writer,
         print_training=True,
-        graph_mode=graph_mode,
+        graph_mode=False,
         graph_idx=prog_args.graph_idx,
     )
+    # adj[u][v] = 1 means that, there's an edge from node v to node u. (directed graph)
 
     # TODO: API should definitely be cleaner
     # Let's define exactly which modes we support 
     # We could even move each mode to a different method (even file)
     if prog_args.explain_node is not None:
         explainer.explain(prog_args.explain_node, unconstrained=False)
-    elif graph_mode:
-        if prog_args.multigraph_class >= 0:
-            print(cg_dict["label"])
-            # only run for graphs with label specified by multigraph_class
-            labels = cg_dict["label"].numpy()
-            graph_indices = []
-            for i, l in enumerate(labels):
-                if l == prog_args.multigraph_class:
-                    graph_indices.append(i)
-                if len(graph_indices) > 30:
-                    break
-            print(
-                "Graph indices for label ",
-                prog_args.multigraph_class,
-                " : ",
-                graph_indices,
-            )
-            explainer.explain_graphs(graph_indices=graph_indices)
 
-        elif prog_args.graph_idx == -1:
-            # just run for a customized set of indices
-            explainer.explain_graphs(graph_indices=[1, 2, 3, 4])
-        else:
-            explainer.explain(
-                node_idx=0,
-                graph_idx=prog_args.graph_idx,
-                graph_mode=True,
-                unconstrained=False,
-            )
-            io_utils.plot_cmap_tb(writer, "tab20", 20, "tab20_cmap")
-    else:
+    elif prog_args.link_prediction == True:
         if prog_args.multinode_class >= 0:
-            print(cg_dict["label"])
+            print(cg_dict["label_test"])
             # only run for nodes with label specified by multinode_class
-            labels = cg_dict["label"][0]  # already numpy matrix
+            labels = cg_dict["label_test"][0]  # already numpy matrix
 
             node_indices = []
             for i, l in enumerate(labels):
@@ -307,10 +266,14 @@ def main():
             explainer.explain_nodes(node_indices, prog_args)
 
         else:
-            # explain a set of nodes
-            masked_adj = explainer.explain_nodes_gnn_stats(
-                range(400, 700, 5), prog_args
+            src_masked_adj, dst_masked_adj = explainer.explain_link(
+                prog_args
             )
+            # explain a set of nodes, one by one
+            # masked_adj = explainer.explain_nodes_gnn_stats(
+            #     range(400, 700, 5), prog_args
+            # )
+
 
 if __name__ == "__main__":
     main()

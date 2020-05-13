@@ -429,7 +429,7 @@ def numpy_to_torch(img, requires_grad=True):
 def attribute2vec(attrs):
     list = []
     for i in range(len(attrs)):
-        list.append(i + random.random())
+        list.append(random.randint(0, 10) + random.random())
     return np.array(list)
 
 
@@ -564,7 +564,7 @@ def read_graphfile(datadir, dataname):
     # # indexed from 0
     # G = nx.relabel_nodes(G, mapping)
 
-    return G, edge_labels, num_node_labels, num_edge_labels
+    return G, node_labels, edge_labels, num_node_labels, num_edge_labels
 
 
 def log_assignment(assign_tensor, writer, epoch, batch_idx):
