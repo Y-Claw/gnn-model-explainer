@@ -43,6 +43,7 @@ class Explainer:
     def __init__(
         self,
         model,
+        graph,
         adj,
         feat,
         node_labels,
@@ -60,6 +61,7 @@ class Explainer:
     ):
         self.model = model
         self.model.eval()
+        self.graph = graph
         self.adj = adj
         self.feat = feat
         self.node_labels = node_labels
@@ -94,16 +96,66 @@ class Explainer:
 
         return node_idx_new, sub_adj, sub_feat, sub_node_label, neighbors
 
+    def explain_a_set_of_links(self, args):
+        src_explain_res = []
+        dst_explain_res = []
 
-    def explain_link(self, args, unconstrained=False, model="exp"):
+        src_denoise_res = []
+        dst_denoise_res = []
+
+        # labels = self.test_labels
+        # edges = self.test_idx
+        # pred = self.pred_test
+        labels = self.train_labels[:, :10]
+        pred = self.pred_train[:, :10]
+        edges = self.train_idx[:10]
+
+        for index in range(edges.shape[0]):
+            src_idx = edges[index][0]
+            dst_idx = edges[index][1]
+            link_label = labels[0][index]
+            pred_label = pred[:, index]
+            print("src_idx: ", src_idx, ", dst_idx: ", dst_idx)
+            print("src node label: ", self.node_labels[0][src_idx])
+            print("dst node label: ", self.node_labels[0][dst_idx])
+            src_results, dst_results = self.explain_link(
+                    src_idx, dst_idx, link_label, pred_label, args
+            )
+            src_explain_res.append(src_results)
+            dst_explain_res.append(dst_results)
+
+            src_sub_feat = src_results["src_sub_feat"]
+            src_masked_adj = src_results["src_masked_adj"]
+            src_idx_new = src_results["src_idx_new"]
+            src_neighbors = src_results["src_neighbors"]
+
+            dst_sub_feat = dst_results["dst_sub_feat"]
+            dst_masked_adj = dst_results["dst_masked_adj"]
+            dst_idx_new = dst_results["dst_idx_new"]
+            dst_neighbors = dst_results["dst_neighbors"]
+
+            src_denoise_result = io_utils.denoise_adj_feat(
+                self.graph, src_masked_adj, src_idx_new, src_sub_feat, src_neighbors,
+                edge_threshold=0.0001, feat_threshold=0.001
+            )
+            dst_denoise_result = io_utils.denoise_adj_feat(
+                self.graph, dst_masked_adj, dst_idx_new, dst_sub_feat, dst_neighbors,
+                edge_threshold=0.0001, feat_threshold=0.001
+            )
+            src_denoise_res.append(src_denoise_result)
+            dst_denoise_res.append(dst_denoise_result)
+
+        return src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res
+
+    def explain_link(self, src_idx, dst_idx, link_label, pred_label, args, unconstrained=False, model="exp"):
         """Explain link prediction for a single node pair
         """
-        index = 0
-        src_idx = self.train_idx[index][0]
-        dst_idx = self.train_idx[index][1]
-        link_label = self.train_labels[0][index]
-        print("src node label: ", self.node_labels[0][src_idx])
-        print("dst node label: ", self.node_labels[0][dst_idx])
+        # index = 1
+        # src_idx = self.train_idx[index][0]
+        # dst_idx = self.train_idx[index][1]
+        # link_label = self.train_labels[0][index]
+        # print("src node label: ", self.node_labels[0][src_idx])
+        # print("dst node label: ", self.node_labels[0][dst_idx])
         src_idx_new, src_adj, src_sub_feat, src_sub_label, src_neighbors = self.extract_neighborhood_in_directed_graph(
             src_idx
         )
@@ -126,7 +178,7 @@ class Explainer:
         link_label = torch.tensor(link_label, dtype=torch.long)
         print("link label:", link_label)
 
-        pred_label = self.pred_train[:, index]
+        # pred_label = self.pred_train[:, index]
         pred_label[pred_label < 0.5] = 0
         pred_label[pred_label >= 0.5] = 1
         pred_label = torch.tensor(pred_label, dtype=torch.long)
@@ -232,7 +284,13 @@ class Explainer:
                 explainer.src_masked_adj[0].cpu().detach().numpy() * src_adj[0].cpu().detach().numpy()
             )
             dst_masked_adj = (
-                    explainer.dst_masked_adj[0].cpu().detach().numpy() * dst_adj[0].cpu().detach().numpy()
+                explainer.dst_masked_adj[0].cpu().detach().numpy() * dst_adj[0].cpu().detach().numpy()
+            )
+            src_sub_feat = (
+                explainer.src_feat_mask.cpu().detach().numpy() * src_x[0].cpu().detach().numpy()
+            )
+            dst_sub_feat = (
+                explainer.dst_feat_mask.cpu().detach().numpy() * dst_x[0].cpu().detach().numpy()
             )
         # else:
         #     adj_atts = nn.functional.sigmoid(adj_atts).squeeze()
@@ -243,9 +301,174 @@ class Explainer:
         with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
             np.save(outfile, np.asarray(src_masked_adj.copy()))
             np.save(outfile, np.asarray(dst_masked_adj.copy()))
+            np.save(outfile, np.array(src_sub_feat.copy()))
+            np.save(outfile, np.array(dst_sub_feat.copy()))
             print("Saved adjacency matrix to ", fname)
-        return src_masked_adj, dst_masked_adj
 
+        src_results = {
+            "src_sub_feat": src_sub_feat,
+            "src_masked_adj": src_masked_adj,
+            "src_idx_new": src_idx_new,
+            "src_sub_label": src_sub_label,
+            "src_neighbors": src_neighbors,
+        }
+        dst_results = {
+            "dst_sub_feat": dst_sub_feat,
+            "dst_masked_adj": dst_masked_adj,
+            "dst_idx_new": dst_idx_new,
+            "dst_sub_label": dst_sub_label,
+            "dst_neighbors": dst_neighbors,
+        }
+        return src_results, dst_results
+
+    # Main method
+    def explain(
+            self, node_idx, graph_idx=0, graph_mode=False, unconstrained=False, model="exp"
+    ):
+        """Explain a single node prediction
+        """
+        # index of the query node in the new adj
+        if graph_mode:
+            node_idx_new = node_idx
+            sub_adj = self.adj[graph_idx]
+            sub_feat = self.feat[graph_idx, :]
+            sub_label = self.label[graph_idx]
+            neighbors = np.asarray(range(self.adj.shape[0]))
+        else:
+            print("node label: ", self.label[graph_idx][node_idx])
+            node_idx_new, sub_adj, sub_feat, sub_label, neighbors = self.extract_neighborhood(
+                node_idx, graph_idx
+            )
+            print("neigh graph idx: ", node_idx, node_idx_new)
+            sub_label = np.expand_dims(sub_label, axis=0)
+
+        sub_adj = np.expand_dims(sub_adj, axis=0)
+        sub_feat = np.expand_dims(sub_feat, axis=0)
+
+        adj = torch.tensor(sub_adj, dtype=torch.float)
+        x = torch.tensor(sub_feat, requires_grad=True, dtype=torch.float)
+        label = torch.tensor(sub_label, dtype=torch.long)
+
+        if self.graph_mode:
+            pred_label = np.argmax(self.pred[0][graph_idx], axis=0)
+            print("Graph predicted label: ", pred_label)
+        else:
+            pred_label = np.argmax(self.pred[graph_idx][neighbors], axis=1)
+            print("Node predicted label: ", pred_label[node_idx_new])
+
+        explainer = ExplainModule(
+            adj=adj,
+            x=x,
+            model=self.model,
+            label=label,
+            args=self.args,
+            writer=self.writer,
+            graph_idx=self.graph_idx,
+            graph_mode=self.graph_mode,
+        )
+        if self.args.gpu:
+            explainer = explainer.cuda()
+
+        self.model.eval()
+
+        # gradient baseline
+        if model == "grad":
+            explainer.zero_grad()
+            # pdb.set_trace()
+            adj_grad = torch.abs(
+                explainer.adj_feat_grad(node_idx_new, pred_label[node_idx_new])[0]
+            )[graph_idx]
+            masked_adj = adj_grad + adj_grad.t()
+            masked_adj = nn.functional.sigmoid(masked_adj)
+            masked_adj = masked_adj.cpu().detach().numpy() * sub_adj.squeeze()
+        else:
+            explainer.train()
+            begin_time = time.time()
+            for epoch in range(self.args.num_epochs):
+                explainer.zero_grad()
+                explainer.optimizer.zero_grad()
+                ypred, adj_atts = explainer(node_idx_new, unconstrained=unconstrained)
+                loss = explainer.loss(ypred, pred_label, node_idx_new, epoch)
+                loss.backward()
+
+                explainer.optimizer.step()
+                if explainer.scheduler is not None:
+                    explainer.scheduler.step()
+
+                mask_density = explainer.mask_density()
+                if self.print_training:
+                    print(
+                        "epoch: ",
+                        epoch,
+                        "; loss: ",
+                        loss.item(),
+                        "; mask density: ",
+                        mask_density.item(),
+                        "; pred: ",
+                        ypred,
+                    )
+                single_subgraph_label = sub_label.squeeze()
+
+                if self.writer is not None:
+                    self.writer.add_scalar("mask/density", mask_density, epoch)
+                    self.writer.add_scalar(
+                        "optimization/lr",
+                        explainer.optimizer.param_groups[0]["lr"],
+                        epoch,
+                    )
+                    if epoch % 25 == 0:
+                        explainer.log_mask(epoch)
+                        explainer.log_masked_adj(
+                            node_idx_new, epoch, label=single_subgraph_label
+                        )
+                        explainer.log_adj_grad(
+                            node_idx_new, pred_label, epoch, label=single_subgraph_label
+                        )
+
+                    if epoch == 0:
+                        if self.model.att:
+                            # explain node
+                            print("adj att size: ", adj_atts.size())
+                            adj_att = torch.sum(adj_atts[0], dim=2)
+                            # adj_att = adj_att[neighbors][:, neighbors]
+                            node_adj_att = adj_att * adj.float().cuda()
+                            io_utils.log_matrix(
+                                self.writer, node_adj_att[0], "att/matrix", epoch
+                            )
+                            node_adj_att = node_adj_att[0].cpu().detach().numpy()
+                            G = io_utils.denoise_graph(
+                                node_adj_att,
+                                node_idx_new,
+                                threshold=3.8,  # threshold_num=20,
+                                max_component=True,
+                            )
+                            io_utils.log_graph(
+                                self.writer,
+                                G,
+                                name="att/graph",
+                                identify_self=not self.graph_mode,
+                                nodecolor="label",
+                                edge_vmax=None,
+                                args=self.args,
+                            )
+                if model != "exp":
+                    break
+
+            print("finished training in ", time.time() - begin_time)
+            if model == "exp":
+                masked_adj = (
+                        explainer.masked_adj[0].cpu().detach().numpy() * sub_adj.squeeze()
+                )
+            else:
+                adj_atts = nn.functional.sigmoid(adj_atts).squeeze()
+                masked_adj = adj_atts.cpu().detach().numpy() * sub_adj.squeeze()
+
+        fname = 'masked_adj_' + io_utils.gen_explainer_prefix(self.args) + (
+                'node_idx_' + str(node_idx) + 'graph_idx_' + str(self.graph_idx) + '.npy')
+        with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
+            np.save(outfile, np.asarray(masked_adj.copy()))
+            print("Saved adjacency matrix to ", fname)
+        return masked_adj
 
     # NODE EXPLAINER
     def explain_nodes(self, node_indices, args, graph_idx=0):

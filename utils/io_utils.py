@@ -191,6 +191,66 @@ def log_matrix(writer, mat, name, epoch, fig_size=(8, 6), dpi=200):
     writer.add_image(name, tensorboardX.utils.figure_to_image(fig), epoch)
 
 
+def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=0.1, feat_threshold=0.1):
+    """Cleaning a graph by thresholding its node values.
+
+    Args:
+        - adj               :  Adjacency matrix.
+        - node_idx          :  Index of node to highlight (TODO ?)
+        - feat              :  An array of node features.
+        - label             :  A list of node labels.
+        - threshold         :  The weight threshold.
+        - max_component     :  TODO
+    """
+
+    num_nodes = adj.shape[0]
+
+    if edge_threshold is None:
+        threshold = 1e-6
+
+    reserved_edge_list = []
+    reserved_node_list = []
+    map = {}
+    for i in range(num_nodes):
+        for j in range(num_nodes):
+            if adj[i, j] < edge_threshold:
+                continue
+            src_idx = neighbors[j]
+            dst_idx = neighbors[i]
+            map[src_idx] = j
+            map[dst_idx] = i
+            reserved_node_list.append(src_idx)
+            reserved_node_list.append(dst_idx)
+            if len(graph[src_idx][dst_idx]) == 1:
+                reserved_edge_list.append((src_idx, dst_idx, graph[src_idx][dst_idx][0]["label"]))
+            else:
+                for idx in reversed(range(len(graph[src_idx][dst_idx]))):
+                    reserved_edge_list.append(graph[src_idx][dst_idx][idx]['label'])
+    if len(reserved_node_list) == 0:
+        return None
+    reserved_nodes = np.unique(reserved_node_list)
+    node_idx_new = np.where(reserved_nodes == neighbors[node_idx])[0][0]
+
+    idx = []
+    for node in reserved_nodes:
+        idx.append(map[node])
+    reserved_feat = feat[idx]
+
+    if feat_threshold is None:
+        feat_threshold = 1e-6
+    reserved_feat = torch.sigmoid(torch.tensor(reserved_feat)).detach().numpy()
+    reserved_feat[reserved_feat >= feat_threshold] = 1
+    reserved_feat[reserved_feat < feat_threshold] = 0
+
+    denoise_result = {
+        "reserved_nodes": reserved_nodes,
+        "reserved_edge_list": reserved_edge_list,
+        "reserved_feat": reserved_feat,
+        "node_idx_new": node_idx_new,
+    }
+    return denoise_result
+
+
 def denoise_graph(adj, node_idx, feat=None, label=None, threshold=None, threshold_num=None, max_component=True):
     """Cleaning a graph by thresholding its node values.
 
@@ -429,7 +489,14 @@ def numpy_to_torch(img, requires_grad=True):
 def attribute2vec(attrs):
     list = []
     for i in range(len(attrs)):
-        list.append(random.randint(0, 10) + random.random())
+        if attrs[i] == "" or attrs[i] == "-":
+            list.append(0)
+        else:
+            filtered_attr = re.sub("[-_()\\\\,.`\'\[\]]", "", attrs[i])
+            if filtered_attr.isnumeric():
+                list.append(int(filtered_attr))
+            else:
+                list.append(len(filtered_attr) + random.random())
     return np.array(list)
 
 
@@ -523,13 +590,13 @@ def read_graphfile(datadir, dataname):
             adj_list.append((src, dst, dict(label=elabel)))
             edge_labels.append(elabel)
             num_edges += 1
+    # the order of edge_labels for graph.edges() is not corresponding!
     num_edge_labels = max(edge_labels) + 1
-
 
     # directed graph
     G = nx.MultiDiGraph()
-    G.add_edges_from(adj_list)
     G.add_nodes_from(node_ids)
+    G.add_edges_from(adj_list)
     # undirected graph
     # G = nx.from_edgelist(adj_list)
     # indexed from 1 here
@@ -539,7 +606,7 @@ def read_graphfile(datadir, dataname):
     # G.graph['aromatic'] = aromatic_edge in edge_label_list[i]
 
     for u in G.nodes():
-        if len(node_labels) > 0:
+        if num_node_labels > 0:
             node_label_one_hot = [0] * num_node_labels
             node_label = node_labels[u]
             node_label_one_hot[node_label] = 1
@@ -564,7 +631,7 @@ def read_graphfile(datadir, dataname):
     # # indexed from 0
     # G = nx.relabel_nodes(G, mapping)
 
-    return G, node_labels, edge_labels, num_node_labels, num_edge_labels
+    return G, node_labels, num_node_labels, num_edge_labels
 
 
 def log_assignment(assign_tensor, writer, epoch, batch_idx):

@@ -88,7 +88,7 @@ def arg_parse():
                         max_nodes=100,
                         cuda='1',
                         feature_type='default',
-                        lr=0.001,
+                        lr=0.01,
                         clip=2.0,
                         batch_size=20,
                         num_epochs=100,

@@ -43,12 +43,11 @@ import models
 # Prepare Data
 #
 #############################
-def prepare_data(graph, edge_labels, args, test_graphs=None):
+def prepare_data(graph, num_edge_labels, args, test_graphs=None):
     edges = list(graph.edges())
     num_edges = len(edges)
     num_train = int(num_edges * args.fraction * args.train_ratio)
     num_test = int(num_edges * args.fraction * (1 - args.train_ratio))
-    num_edge_labels = max(edge_labels) + 1
 
     # generate negative data
     # num_nodes = graph.number_of_nodes()
@@ -92,7 +91,7 @@ def prepare_data(graph, edge_labels, args, test_graphs=None):
             continue
         if len(graph[src][dst]) == 1:
             pos_edges.append(edges[index])
-            pos_labels.append(edge_labels[index])
+            pos_labels.append(graph[src][dst][0]["label"])
             graph.remove_edge(src, dst)
         else:
             pos_edges.append(edges[index])
@@ -162,18 +161,15 @@ def prepare_data(graph, edge_labels, args, test_graphs=None):
 #############################
 
 def train_link_classifier(G, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=None):
-    # for p in model.parameters():
-    #     if p.grad is not None:
-    #         print(p.grad.data)
 
-    # adj = nx.to_numpy_array(G)   # wrong
     num_nodes = G.number_of_nodes()
-    adj_origin = [[0] * num_nodes] * num_nodes
-    adj_origin = np.array(adj_origin)
 
-    edges = list(G.edges())
-    for edge in edges:
-        adj_origin[edge[0]][edge[1]] += 1
+    adj_origin = nx.to_numpy_array(G)
+    # adj_origin = [[0] * num_nodes] * num_nodes
+    # adj_origin = np.array(adj_origin)
+    # edges = list(G.edges())
+    # for edge in edges:
+    #     adj_origin[edge[0]][edge[1]] += 1
     adj = adj_origin.transpose()   # for collecting information from in-edges during 'forward' in GraphConv class.
 
     existing_node = list(G.nodes)[-1]
@@ -213,37 +209,53 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
         elapsed = time.time() - begin_time
 
-        result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels)
+        # result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels)
+        average_precision_train, average_precision_test = evaluate_node(
+                model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels
+        )
 
-        if writer is not None:
-            writer.add_scalar("loss/avg_loss", loss.item(), epoch)
-            writer.add_scalars(
-                "prec",
-                {"train": result_train["prec"], "test": result_test["prec"]},
-                epoch,
-            )
-            writer.add_scalars(
-                "recall",
-                {"train": result_train["recall"], "test": result_test["recall"]},
-                epoch,
-            )
-            writer.add_scalars(
-                "acc", {"train": result_train["acc"], "test": result_test["acc"]}, epoch
-            )
+        # if writer is not None:
+        #     writer.add_scalar("loss/avg_loss", loss.item(), epoch)
+        #     writer.add_scalars(
+        #         "prec",
+        #         {"train": result_train["prec"], "test": result_test["prec"]},
+        #         epoch,
+        #     )
+        #     writer.add_scalars(
+        #         "recall",
+        #         {"train": result_train["recall"], "test": result_test["recall"]},
+        #         epoch,
+        #     )
+        #     writer.add_scalars(
+        #         "acc", {"train": result_train["acc"], "test": result_test["acc"]}, epoch
+        #     )
+        # if epoch % 10 == 0:
+        #     print(
+        #         "epoch: ",
+        #         epoch,
+        #         "; loss: ",
+        #         loss.item(),
+        #         "; train_acc: ",
+        #         result_train["acc"],
+        #         "; test_acc: ",
+        #         result_test["acc"],
+        #         "; train_prec: ",
+        #         result_train["prec"],
+        #         "; test_prec: ",
+        #         result_test["prec"],
+        #         "; epoch time: ",
+        #         "{0:0.2f}".format(elapsed),
+        #     )
         if epoch % 10 == 0:
             print(
                 "epoch: ",
                 epoch,
                 "; loss: ",
                 loss.item(),
-                "; train_acc: ",
-                result_train["acc"],
-                "; test_acc: ",
-                result_test["acc"],
-                "; train_prec: ",
-                result_train["prec"],
-                "; test_prec: ",
-                result_test["prec"],
+                "; train_avg_precision: ",
+                average_precision_train,
+                "; test_avg_precision: ",
+                average_precision_test,
                 "; epoch time: ",
                 "{0:0.2f}".format(elapsed),
             )
@@ -256,6 +268,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     ypred_train, _ = model(x, adj, train_data)
     ypred_test, _ = model(x, adj, test_data)
     cg_data = {
+        "graph": G,
         "adj": adj.numpy(),
         "feat": x.detach().numpy(),
         "node_labels": np.expand_dims(node_labels, axis=0),
@@ -280,38 +293,68 @@ def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labe
     ypred_test, adj_att = model(x, adj, test_data)
 
     ypred_train = ypred_train.detach().numpy()[0]
-    ypred_train[ypred_train < 0.5] = 0
-    ypred_train[ypred_train >= 0.5] = 1
-    ypred_train = ypred_train.astype(int)
+    # ypred_train[ypred_train < 0.5] = 0
+    # ypred_train[ypred_train >= 0.5] = 1
+    # ypred_train = ypred_train.astype(int)
 
     ypred_test = ypred_test.detach().numpy()[0]
-    ypred_test[ypred_test < 0.5] = 0
-    ypred_test[ypred_test >= 0.5] = 1
-    ypred_test = ypred_test.astype(int)
+    # ypred_test[ypred_test < 0.5] = 0
+    # ypred_test[ypred_test >= 0.5] = 1
+    # ypred_test = ypred_test.astype(int)
 
     train_labels = train_labels.numpy()[0]
     test_labels = test_labels.numpy()[0]
 
-    result_train = {
-        "prec": metrics.precision_score(train_labels, ypred_train, average="samples"),
-        "recall": metrics.recall_score(train_labels, ypred_train, average="samples"),
-        "acc": metrics.accuracy_score(train_labels, ypred_train),
-    }
-    result_test = {
-        "prec": metrics.precision_score(test_labels, ypred_test, average="samples"),
-        "recall": metrics.recall_score(test_labels, ypred_test, average="samples"),
-        "acc": metrics.accuracy_score(test_labels, ypred_test),
-    }
-    return result_train, result_test
+    # For each class
+    precision = dict()
+    recall = dict()
+    average_precision = dict()
+    for i in range(ypred_train.shape[1]):
+        precision[i], recall[i], _ = metrics.precision_recall_curve(train_labels[:, i], ypred_train[:, i])
+        average_precision[i] = metrics.average_precision_score(train_labels[:, i], ypred_train[:, i])
+
+    # A "micro-average": quantifying score on all classes jointly
+    precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(train_labels.ravel(), ypred_train.ravel())
+    average_precision["micro"] = metrics.average_precision_score(train_labels, ypred_train, average="micro")
+    # print('Average precision score, micro-averaged over all classes: {0:0.2f}'
+    #       .format(average_precision["micro"]))
+    average_precision_train = average_precision["micro"]
+
+    # For each class
+    precision = dict()
+    recall = dict()
+    average_precision = dict()
+    for i in range(ypred_test.shape[1]):
+        precision[i], recall[i], _ = metrics.precision_recall_curve(test_labels[:, i], ypred_test[:, i])
+        average_precision[i] = metrics.average_precision_score(test_labels[:, i], ypred_test[:, i])
+
+    # A "micro-average": quantifying score on all classes jointly
+    precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(test_labels.ravel(), ypred_test.ravel())
+    average_precision["micro"] = metrics.average_precision_score(test_labels, ypred_test, average="micro")
+    # print('Average precision score, micro-averaged over all classes: {0:0.2f}'
+    #       .format(average_precision["micro"]))
+    average_precision_test = average_precision["micro"]
+
+    # result_train = {
+    #     "prec": metrics.precision_score(train_labels, ypred_train, average="samples"),
+    #     "recall": metrics.recall_score(train_labels, ypred_train, average="samples"),
+    #     "acc": metrics.accuracy_score(train_labels, ypred_train),
+    # }
+    # result_test = {
+    #     "prec": metrics.precision_score(test_labels, ypred_test, average="samples"),
+    #     "recall": metrics.recall_score(test_labels, ypred_test, average="samples"),
+    #     "acc": metrics.accuracy_score(test_labels, ypred_test),
+    # }
+    return average_precision_train, average_precision_test
 
 
 def link_prediction_task(args, writer=None):
-    graph, node_labels, edge_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
+    graph, node_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
         args.datadir, args.dataset
     )
     input_dim = graph.graph["feat_dim"]
 
-    graph, train_data, train_labels, test_data, test_labels = prepare_data(graph, edge_labels, args)
+    graph, train_data, train_labels, test_data, test_labels = prepare_data(graph, num_edge_labels, args)
 
     model = models.GcnEncoderNode(
         input_dim,

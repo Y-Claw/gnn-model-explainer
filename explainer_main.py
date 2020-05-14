@@ -222,6 +222,7 @@ def main():
     # Create explainer
     explainer = explain.Explainer(
         model=model,
+        graph=cg_dict["graph"],
         adj=cg_dict["adj"],
         feat=cg_dict["feat"],
         node_labels=cg_dict["node_labels"],
@@ -266,7 +267,7 @@ def main():
             explainer.explain_nodes(node_indices, prog_args)
 
         else:
-            src_masked_adj, dst_masked_adj = explainer.explain_link(
+            src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res = explainer.explain_a_set_of_links(
                 prog_args
             )
             # explain a set of nodes, one by one
