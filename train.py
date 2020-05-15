@@ -209,53 +209,41 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
         elapsed = time.time() - begin_time
 
-        # result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels)
-        average_precision_train, average_precision_test = evaluate_node(
-                model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels
-        )
+        result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels)
 
-        # if writer is not None:
-        #     writer.add_scalar("loss/avg_loss", loss.item(), epoch)
-        #     writer.add_scalars(
-        #         "prec",
-        #         {"train": result_train["prec"], "test": result_test["prec"]},
-        #         epoch,
-        #     )
-        #     writer.add_scalars(
-        #         "recall",
-        #         {"train": result_train["recall"], "test": result_test["recall"]},
-        #         epoch,
-        #     )
-        #     writer.add_scalars(
-        #         "acc", {"train": result_train["acc"], "test": result_test["acc"]}, epoch
-        #     )
-        # if epoch % 10 == 0:
-        #     print(
-        #         "epoch: ",
-        #         epoch,
-        #         "; loss: ",
-        #         loss.item(),
-        #         "; train_acc: ",
-        #         result_train["acc"],
-        #         "; test_acc: ",
-        #         result_test["acc"],
-        #         "; train_prec: ",
-        #         result_train["prec"],
-        #         "; test_prec: ",
-        #         result_test["prec"],
-        #         "; epoch time: ",
-        #         "{0:0.2f}".format(elapsed),
-        #     )
+        if writer is not None:
+            writer.add_scalar("loss/avg_loss", loss.item(), epoch)
+            writer.add_scalars(
+                "prec",
+                {"train": result_train["prec"], "test": result_test["prec"]},
+                epoch,
+            )
+            writer.add_scalars(
+                "recall",
+                {"train": result_train["recall"], "test": result_test["recall"]},
+                epoch,
+            )
+            writer.add_scalars(
+                "F1", {"train": result_train["F1"], "test": result_test["F1"]}, epoch
+            )
         if epoch % 10 == 0:
             print(
                 "epoch: ",
                 epoch,
                 "; loss: ",
                 loss.item(),
-                "; train_avg_precision: ",
-                average_precision_train,
-                "; test_avg_precision: ",
-                average_precision_test,
+                "; train_prec: ",
+                result_train["prec"],
+                "; test_prec: ",
+                result_test["prec"],
+                "; train_recall: ",
+                result_train["recall"],
+                "; test_recall: ",
+                result_test["recall"],
+                "; train_F1: ",
+                result_train["F1"],
+                "; test_F1: ",
+                result_test["F1"],
                 "; epoch time: ",
                 "{0:0.2f}".format(elapsed),
             )
@@ -305,47 +293,62 @@ def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labe
     train_labels = train_labels.numpy()[0]
     test_labels = test_labels.numpy()[0]
 
+    num_classes = ypred_train.shape[1]
     # For each class
     precision = dict()
     recall = dict()
+    threshold = dict()
     average_precision = dict()
-    for i in range(ypred_train.shape[1]):
-        precision[i], recall[i], _ = metrics.precision_recall_curve(train_labels[:, i], ypred_train[:, i])
+    for i in range(num_classes):
+        precision[i], recall[i], threshold[i] = metrics.precision_recall_curve(train_labels[:, i], ypred_train[:, i])
         average_precision[i] = metrics.average_precision_score(train_labels[:, i], ypred_train[:, i])
-
     # A "micro-average": quantifying score on all classes jointly
-    precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(train_labels.ravel(), ypred_train.ravel())
-    average_precision["micro"] = metrics.average_precision_score(train_labels, ypred_train, average="micro")
-    # print('Average precision score, micro-averaged over all classes: {0:0.2f}'
-    #       .format(average_precision["micro"]))
-    average_precision_train = average_precision["micro"]
+    # precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(train_labels.ravel(), ypred_train.ravel())
+    # average_precision["micro"] = metrics.average_precision_score(train_labels, ypred_train, average="micro")
+    # average_precision_train = average_precision["micro"]
+
+    precision_sum = 0.0
+    recall_sum = 0.0
+    for i in range(num_classes):
+        precision_sum += sum(precision[i][:(precision[i].shape[0] - 1)]) / (precision[i].shape[0] - 1)
+        recall_sum += sum(recall[i][:(recall[i].shape[0] - 1)]) / (recall[i].shape[0] - 1)
+    prec_train = precision_sum / num_classes
+    rec_train = recall_sum / num_classes
+    F1_train = 2 * prec_train * rec_train / (prec_train + rec_train)
 
     # For each class
     precision = dict()
     recall = dict()
+    threshold = dict()
     average_precision = dict()
-    for i in range(ypred_test.shape[1]):
-        precision[i], recall[i], _ = metrics.precision_recall_curve(test_labels[:, i], ypred_test[:, i])
+    for i in range(num_classes):
+        precision[i], recall[i], threshold[i] = metrics.precision_recall_curve(test_labels[:, i], ypred_test[:, i])
         average_precision[i] = metrics.average_precision_score(test_labels[:, i], ypred_test[:, i])
+    # # A "micro-average": quantifying score on all classes jointly
+    # precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(test_labels.ravel(), ypred_test.ravel())
+    # average_precision["micro"] = metrics.average_precision_score(test_labels, ypred_test, average="micro")
+    # average_precision_test = average_precision["micro"]
 
-    # A "micro-average": quantifying score on all classes jointly
-    precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(test_labels.ravel(), ypred_test.ravel())
-    average_precision["micro"] = metrics.average_precision_score(test_labels, ypred_test, average="micro")
-    # print('Average precision score, micro-averaged over all classes: {0:0.2f}'
-    #       .format(average_precision["micro"]))
-    average_precision_test = average_precision["micro"]
+    precision_sum = 0.0
+    recall_sum = 0.0
+    for i in range(num_classes):
+        precision_sum += sum(precision[i][:(precision[i].shape[0] - 1)]) / (precision[i].shape[0] - 1)
+        recall_sum += sum(recall[i][:(recall[i].shape[0] - 1)]) / (recall[i].shape[0] - 1)
+    prec_test = precision_sum / num_classes
+    rec_test = recall_sum / num_classes
+    F1_test = 2 * prec_test * rec_test / (prec_test + rec_test)
 
-    # result_train = {
-    #     "prec": metrics.precision_score(train_labels, ypred_train, average="samples"),
-    #     "recall": metrics.recall_score(train_labels, ypred_train, average="samples"),
-    #     "acc": metrics.accuracy_score(train_labels, ypred_train),
-    # }
-    # result_test = {
-    #     "prec": metrics.precision_score(test_labels, ypred_test, average="samples"),
-    #     "recall": metrics.recall_score(test_labels, ypred_test, average="samples"),
-    #     "acc": metrics.accuracy_score(test_labels, ypred_test),
-    # }
-    return average_precision_train, average_precision_test
+    result_train = {
+        "prec": prec_train,
+        "recall": rec_train,
+        "F1": F1_train,
+    }
+    result_test = {
+        "prec": prec_test,
+        "recall": rec_test,
+        "F1": F1_test,
+    }
+    return result_train, result_test
 
 
 def link_prediction_task(args, writer=None):

@@ -103,12 +103,12 @@ class Explainer:
         src_denoise_res = []
         dst_denoise_res = []
 
-        # labels = self.test_labels
-        # edges = self.test_idx
-        # pred = self.pred_test
-        labels = self.train_labels[:, :10]
-        pred = self.pred_train[:, :10]
-        edges = self.train_idx[:10]
+        labels = self.test_labels[:, :10]
+        edges = self.test_idx[:10]
+        pred = self.pred_test[:, :10]
+        # labels = self.train_labels[:, :10]
+        # pred = self.pred_train[:, :10]
+        # edges = self.train_idx[:10]
 
         for index in range(edges.shape[0]):
             src_idx = edges[index][0]

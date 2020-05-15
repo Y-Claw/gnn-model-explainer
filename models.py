@@ -381,8 +381,6 @@ class GcnEncoderNode(GcnEncoderGraph):
             dst_idx = train_edges[:, 1]
             src_embed_tensor = self.embedding_tensor[:, src_idx]
             dst_embed_tensor = self.embedding_tensor[:, dst_idx]
-            # src_embed_tensor = self.embedding_tensor[0][src_idx]
-            # dst_embed_tensor = self.embedding_tensor[0][dst_idx]
             link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
 
             # node_embeddings = self.embedding_tensor.data.numpy()[0]
@@ -403,7 +401,7 @@ class GcnEncoderNode(GcnEncoderGraph):
                 x2, adj2, self.conv_first, self.conv_block, self.conv_last, embedding_mask
             )
             src_embed_tensor = self.embedding_tensor[:, train_edges[0]]
-            dst_embed_tensor = self.embedding_tensor2[:, train_edges[0]]
+            dst_embed_tensor = self.embedding_tensor2[:, train_edges[1]]
             link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
             pred = self.pred_model(link_embed_tensor)
             pred = torch.sigmoid(pred)
