@@ -71,7 +71,8 @@ class Explainer:
         self.pred_test = pred_test
         self.train_idx = train_idx
         self.test_idx = test_idx
-        self.n_hops = args.num_gc_layers
+        # self.n_hops = args.num_gc_layers
+        self.n_hops = 1
         self.graph_mode = graph_mode
         self.graph_idx = graph_idx
         self.neighborhoods = None if self.graph_mode else graph_utils.neighborhoods(adj=self.adj, n_hops=self.n_hops, use_cuda=use_cuda)
@@ -136,7 +137,7 @@ class Explainer:
 
             src_denoise_result = io_utils.denoise_adj_feat(
                 self.graph, src_masked_adj, src_idx_new, src_sub_feat, src_neighbors,
-                edge_threshold=0.0001, feat_threshold=0.001
+                edge_threshold=0.001, feat_threshold=0.001
             )
             dst_denoise_result = io_utils.denoise_adj_feat(
                 self.graph, dst_masked_adj, dst_idx_new, dst_sub_feat, dst_neighbors,
@@ -173,15 +174,17 @@ class Explainer:
         dst_adj = torch.tensor(dst_adj, dtype=torch.float)
         dst_x = torch.tensor(dst_sub_feat, requires_grad=True, dtype=torch.float)
 
-        link_label = link_label.tolist()
-        link_label = np.expand_dims(link_label, axis=0)
-        link_label = torch.tensor(link_label, dtype=torch.long)
+        if args.multi_label:
+            link_label = link_label.tolist()
+            link_label = np.expand_dims(link_label, axis=0)
+            link_label = torch.tensor(link_label, dtype=torch.long)
         print("link label:", link_label)
 
         # pred_label = self.pred_train[:, index]
-        pred_label[pred_label < 0.5] = 0
-        pred_label[pred_label >= 0.5] = 1
-        pred_label = torch.tensor(pred_label, dtype=torch.long)
+        if args.multi_label:
+            pred_label[pred_label < 0.5] = 0
+            pred_label[pred_label >= 0.5] = 1
+        pred_label = torch.tensor(pred_label)
         print("link predicted label: ", pred_label)
 
         explainer = ExplainModule(
@@ -1037,7 +1040,7 @@ class ExplainModule(nn.Module):
             # gt_label_node = self.label if self.graph_mode else self.label[0][node_idx]
             # logit = pred[gt_label_node]
             # pred_loss = -torch.log(logit)
-            pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())
+            pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
         # size
         src_mask = self.src_mask
         dst_mask = self.dst_mask

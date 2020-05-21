@@ -358,8 +358,12 @@ class GcnEncoderNode(GcnEncoderGraph):
             print("Loss weight: ", args.loss_weight)
             self.celoss = nn.CrossEntropyLoss(weight=args.loss_weight)
         else:
-            # self.celoss = nn.CrossEntropyLoss()
-            self.bceloss = nn.BCELoss()
+            if args.multi_label:
+                self.bceloss = nn.BCELoss()
+            else:
+                self.celoss = nn.CrossEntropyLoss()
+        self.single_edge_label = args.single_edge_label
+        self.multi_label = args.multi_label
 
     def forward(self, x, adj, train_edges, x2=None, adj2=None, batch_num_nodes=None, **kwargs):
         # mask
@@ -381,7 +385,9 @@ class GcnEncoderNode(GcnEncoderGraph):
             dst_idx = train_edges[:, 1]
             src_embed_tensor = self.embedding_tensor[:, src_idx]
             dst_embed_tensor = self.embedding_tensor[:, dst_idx]
-            link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
+            # link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
+            link_embed_tensor = src_embed_tensor * dst_embed_tensor
+            # link_embed_tensor = src_embed_tensor @ torch.transpose(dst_embed_tensor, 1, 2)  # not good
 
             # node_embeddings = self.embedding_tensor.data.numpy()[0]
             # src_idx = train_edges[:, 0]
@@ -394,7 +400,8 @@ class GcnEncoderNode(GcnEncoderGraph):
             # link_embed_tensor = torch.tensor(link_embeddings, requires_grad=True, dtype=torch.float)
 
             pred = self.pred_model(link_embed_tensor)
-            pred = torch.sigmoid(pred)
+            if self.multi_label:
+                pred = torch.sigmoid(pred)
             return pred, adj_att
         else:                                                                      # for explaining a pair of nodes
             self.embedding_tensor2, adj_att2 = self.gcn_forward(
@@ -402,16 +409,20 @@ class GcnEncoderNode(GcnEncoderGraph):
             )
             src_embed_tensor = self.embedding_tensor[:, train_edges[0]]
             dst_embed_tensor = self.embedding_tensor2[:, train_edges[1]]
-            link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
+            # link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
+            link_embed_tensor = src_embed_tensor * dst_embed_tensor
             pred = self.pred_model(link_embed_tensor)
-            pred = torch.sigmoid(pred)
+            if self.multi_label:
+                pred = torch.sigmoid(pred)
             return pred, adj_att, adj_att2
 
     def loss(self, pred, label):
-        # pred = torch.transpose(pred, 1, 2)
-        # return self.celoss(pred, label)
-        return self.bceloss(pred, label.float())
-        # return F.binary_cross_entropy(torch.sigmoid(pred), label.float())
+        if self.single_edge_label:
+            pred = torch.transpose(pred, 1, 2)
+            return self.celoss(pred, label)
+        elif self.multi_label:
+            return self.bceloss(pred, label.float())
+            # return F.binary_cross_entropy(torch.sigmoid(pred), label.float())
 
 
 class SoftPoolingGcnEncoder(GcnEncoderGraph):

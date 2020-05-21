@@ -141,13 +141,19 @@ def arg_parse():
 
     parser.add_argument('--link_prediction', dest='link_prediction',
                         help='whether do link prediction task')
+    parser.add_argument('--single_edge_label', dest='single_edge_label',
+                        help='whether there is only one type of edges in the graph')
+    parser.add_argument('--multi_label', dest='multi_label',
+                        help='whether multi label classification for link prediction')
 
     # TODO: Check argument usage
     parser.set_defaults(
         logdir="log",
         ckptdir="ckpt",
-        dataset="AIDS",
+        dataset="USAir",
         link_prediction=True,
+        single_edge_label=True,
+        multi_label=False,
         opt="adam",  
         opt_scheduler="none",
         cuda="0",

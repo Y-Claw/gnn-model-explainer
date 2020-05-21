@@ -471,6 +471,7 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     shape = torch.Size(sparse_mx.shape)
     return torch.sparse.FloatTensor(indices, values, shape)
 
+
 def numpy_to_torch(img, requires_grad=True):
     if len(img.shape) < 3:
         output = np.float32([img])
@@ -486,21 +487,45 @@ def numpy_to_torch(img, requires_grad=True):
     return v
 
 
+def is_number_str(numStr):
+    flag = False
+    numStr = str(numStr).strip().lstrip('-').lstrip('+')
+    if str(numStr).isdigit():
+        flag = True
+    return flag
+
+
+def is_float_str(numStr):
+    flag = False
+    numStr = str(numStr).strip().lstrip('-').lstrip('+')
+    try:
+        reg = re.compile(r'^[-+]?[0-9]+\.[0-9]+$')
+        res = reg.match(str(numStr))
+        if res:
+            flag = True
+    except Exception as ex:
+        print("is_float() - error: " + str(ex))
+    return flag
+
+
 def attribute2vec(attrs):
     list = []
     for i in range(len(attrs)):
         if attrs[i] == "" or attrs[i] == "-":
             list.append(0)
         else:
-            filtered_attr = re.sub("[-_()\\\\,.`\'\[\]]", "", attrs[i])
-            if filtered_attr.isnumeric():
+            # filtered_attr = re.sub("[-_()\\\\,`\'\[\]]", "", attrs[i])
+            filtered_attr = attrs[i]
+            if is_number_str(filtered_attr):
                 list.append(int(filtered_attr))
+            elif is_float_str(filtered_attr):
+                list.append(float(filtered_attr))
             else:
                 list.append(len(filtered_attr) + random.random())
     return np.array(list)
 
 
-def read_graphfile(datadir, dataname):
+def read_graphfile(datadir, dataname, multi_label):
     """ Read data from https://ls11-www.cs.tu-dortmund.de/staff/morris/graphkerneldatasets
         graph index starts with 1 in file
 
@@ -573,10 +598,21 @@ def read_graphfile(datadir, dataname):
     node_attrs = []
     with open(filename_v) as f:
         for line in f:
+            if line == "\n":
+                continue
             line = line.strip("\n").split("\t")
             node_ids.append(int(line[0]))
             node_labels.append(int(line[1]))
-            node_attrs.append(attribute2vec(line[2:]))
+            # node_attrs.append(attribute2vec(line[2:]))
+            attr_list = []
+            for attr in line[2:]:
+                attr = attr.split(" ")
+                if len(attr) == 1:
+                    attr_list.append(float(attr[0]))
+                else:
+                    for element in attr:
+                        attr_list.append(float(element))
+            node_attrs.append(np.array(attr_list))
     num_node_labels = max(node_labels) + 1
 
     filename_e = prefix + ".e"  # (src_label, dst_label, edge_label)
@@ -605,14 +641,19 @@ def read_graphfile(datadir, dataname):
     # aromatic_edge = 2
     # G.graph['aromatic'] = aromatic_edge in edge_label_list[i]
 
-    for u in G.nodes():
-        if num_node_labels > 0:
-            node_label_one_hot = [0] * num_node_labels
-            node_label = node_labels[u]
-            node_label_one_hot[node_label] = 1
-            G.nodes[u]["label"] = node_label_one_hot
-        if len(node_attrs) > 0:
+    if not multi_label:
+        for u in G.nodes():
+            G.nodes[u]["label"] = node_labels[u]
             G.nodes[u]["feat"] = node_attrs[u]
+    else:
+        for u in G.nodes():
+            if num_node_labels > 0:
+                node_label_one_hot = [0] * num_node_labels
+                node_label = node_labels[u]
+                node_label_one_hot[node_label] = 1
+                G.nodes[u]["label"] = node_label_one_hot
+            if len(node_attrs) > 0:
+                G.nodes[u]["feat"] = node_attrs[u]
     if len(node_attrs) > 0:
         G.graph["feat_dim"] = node_attrs[0].shape[0]
 

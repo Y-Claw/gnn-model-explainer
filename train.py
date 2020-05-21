@@ -46,112 +46,166 @@ import models
 def prepare_data(graph, num_edge_labels, args, test_graphs=None):
     edges = list(graph.edges())
     num_edges = len(edges)
+    num_nodes = graph.number_of_nodes()
     num_train = int(num_edges * args.fraction * args.train_ratio)
     num_test = int(num_edges * args.fraction * (1 - args.train_ratio))
 
-    # generate negative data
-    # num_nodes = graph.number_of_nodes()
-    # neg_data = []
-    # neg_labels = []
-    # k = 0
-    # total_num = num_train + num_test
-    # while (k < total_num):
-    #     src = random.randint(0, num_nodes-1)
-    #     dst = random.randint(0, num_nodes-1)
-    #     elabel = random.randint(0, num_edge_labels-1)
-    #     if not graph.has_edge(src, dst):
-    #         neg_data.append((src, dst))
-    #         neg_labels.append(elabel)
-    #         k = k + 1
-    #     # else:
-    #     #     flag = 0
-    #     #     for i in range(len(graph[src][dst])):
-    #     #         if graph[src][dst][i]['label'] == elabel:
-    #     #             flag = 1
-    #     #             break
-    #     #     if flag == 0:
-    #     #         neg_data.append((src, dst))
-    #     #         neg_labels.append(elabel)
-    #     #         k = k + 1
-    # neg_train_edges = neg_data[:num_train]
-    # neg_train_labels = neg_labels[:num_train]
-    # neg_test_edges = neg_data[num_train:]
-    # neg_test_labels = neg_labels[num_train:]
-
-    # generate positive data
-    idx = [i for i in range(num_edges)]
-    np.random.shuffle(idx)
-    pos_idx = idx[:(num_train+num_test)]
-    pos_edges = []
-    pos_labels = []
-    for index in pos_idx:
-        src = edges[index][0]
-        dst = edges[index][1]
-        if not graph.has_edge(src, dst):
-            continue
-        if len(graph[src][dst]) == 1:
+    if args.single_edge_label:
+        # generate positive data
+        idx = [i for i in range(num_edges)]
+        np.random.shuffle(idx)
+        pos_idx = idx[:(num_train + num_test)]
+        pos_edges = []
+        pos_labels = []
+        for index in pos_idx:
+            src = edges[index][0]
+            dst = edges[index][1]
+            if not graph.has_edge(src, dst):
+                continue
             pos_edges.append(edges[index])
-            pos_labels.append(graph[src][dst][0]["label"])
+            pos_labels.append(1)
             graph.remove_edge(src, dst)
-        else:
-            pos_edges.append(edges[index])
-            pos_labels.append([])
-            for i in reversed(range(len(graph[src][dst]))):
-                pos_labels[len(pos_labels) - 1].append(graph[src][dst][i]['label'])
-                graph.remove_edge(src, dst)       # in a pop way
+        num_train = int(len(pos_edges) * args.train_ratio)
+        pos_train_edges = pos_edges[:num_train]
+        pos_test_edges = pos_edges[num_train:]
+        pos_train_labels = pos_labels[:num_train]
+        pos_test_labels = pos_labels[num_train:]
 
-    # change edge labels into one-hop form
-    for i in range(len(pos_labels)):
-        edge_label_one_hot = [0] * num_edge_labels
-        edge_labels = pos_labels[i]
-        if isinstance(edge_labels, int):
-            edge_label_one_hot[edge_labels] = 1
-        else:
-            for label in edge_labels:
-                edge_label_one_hot[label] = 1
-        pos_labels[i] = edge_label_one_hot
+        # generate negative data
+        neg_data = []
+        neg_labels = []
+        k = 0
+        while (k < len(pos_edges)):
+            src = random.randint(0, num_nodes-1)
+            dst = random.randint(0, num_nodes-1)
+            if not graph.has_edge(src, dst):
+                neg_data.append((src, dst))
+                neg_labels.append(0)
+                k = k + 1
+        neg_train_edges = neg_data[:num_train]
+        neg_train_labels = neg_labels[:num_train]
+        neg_test_edges = neg_data[num_train:]
+        neg_test_labels = neg_labels[num_train:]
 
-    num_train = int(len(pos_edges) * args.train_ratio)
-    pos_train_edges = pos_edges[:num_train]
-    pos_test_edges = pos_edges[num_train:]
-    pos_train_labels = pos_labels[:num_train]
-    pos_test_labels = pos_labels[num_train:]
-    print(
-        "Num training edges: ",
-        len(pos_train_edges),
-        # len(pos_train_edges) + len(neg_train_edges),
-        "; Num testing edges: ",
-        len(pos_test_edges),
-        # len(pos_test_edges) + len(neg_test_edges)
-    )
+        print(
+            "Num training edges: ",
+            len(pos_train_edges) + len(neg_train_edges),
+            "; Num testing edges: ",
+            len(pos_test_edges) + len(neg_test_edges)
+        )
+        print("Number of edges left: ", graph.number_of_edges())
 
-    print("Number of edges left: ", graph.number_of_edges())
+        train_data = pos_train_edges + neg_train_edges
+        train_labels = pos_train_labels + neg_train_labels
+        test_data = pos_test_edges + neg_test_edges
+        test_labels = pos_test_labels + neg_test_labels
 
-    # for i in range(len(pos_test_labels)):
-    #     edge_label_one_hot = [0] * num_edge_labels
-    #     edge_label = pos_test_labels[i]
-    #     edge_label_one_hot[edge_label] = 1
-    #     pos_test_labels[i] = edge_label_one_hot
+        return graph, np.array(train_data), np.array(train_labels), np.array(test_data), np.array(test_labels)
 
-    # for i in range(len(neg_train_labels)):
-    #     edge_label_one_hot = [0] * num_edge_labels
-    #     # edge_label = neg_train_labels[i]
-    #     # edge_label_one_hot[edge_label] = 1
-    #     neg_train_labels[i] = edge_label_one_hot
-    #
-    # for i in range(len(neg_test_labels)):
-    #     edge_label_one_hot = [0] * num_edge_labels
-    #     # edge_label = neg_test_labels[i]
-    #     # edge_label_one_hot[edge_label] = 1
-    #     neg_test_labels[i] = edge_label_one_hot
+    if args.multi_label: # multi-label, multi-class
+        # generate negative data
+        # num_nodes = graph.number_of_nodes()
+        # neg_data = []
+        # neg_labels = []
+        # k = 0
+        # total_num = num_train + num_test
+        # while (k < total_num):
+        #     src = random.randint(0, num_nodes-1)
+        #     dst = random.randint(0, num_nodes-1)
+        #     elabel = random.randint(0, num_edge_labels-1)
+        #     if not graph.has_edge(src, dst):
+        #         neg_data.append((src, dst))
+        #         neg_labels.append(elabel)
+        #         k = k + 1
+        #     # else:
+        #     #     flag = 0
+        #     #     for i in range(len(graph[src][dst])):
+        #     #         if graph[src][dst][i]['label'] == elabel:
+        #     #             flag = 1
+        #     #             break
+        #     #     if flag == 0:
+        #     #         neg_data.append((src, dst))
+        #     #         neg_labels.append(elabel)
+        #     #         k = k + 1
+        # neg_train_edges = neg_data[:num_train]
+        # neg_train_labels = neg_labels[:num_train]
+        # neg_test_edges = neg_data[num_train:]
+        # neg_test_labels = neg_labels[num_train:]
 
-    train_data = pos_train_edges # + neg_train_edges
-    train_labels = pos_train_labels # + neg_train_labels
+        # generate positive data
+        idx = [i for i in range(num_edges)]
+        np.random.shuffle(idx)
+        pos_idx = idx[:(num_train+num_test)]
+        pos_edges = []
+        pos_labels = []
+        for index in pos_idx:
+            src = edges[index][0]
+            dst = edges[index][1]
+            if not graph.has_edge(src, dst):
+                continue
+            if len(graph[src][dst]) == 1:
+                pos_edges.append(edges[index])
+                pos_labels.append(graph[src][dst][0]["label"])
+                graph.remove_edge(src, dst)
+            else:
+                pos_edges.append(edges[index])
+                pos_labels.append([])
+                for i in reversed(range(len(graph[src][dst]))):
+                    pos_labels[len(pos_labels) - 1].append(graph[src][dst][i]['label'])
+                    graph.remove_edge(src, dst)       # in a pop way
 
-    test_data = pos_test_edges # + neg_test_edges
-    test_labels = pos_test_labels # + neg_test_labels
+        # change edge labels into one-hop form
+        for i in range(len(pos_labels)):
+            edge_label_one_hot = [0] * num_edge_labels
+            edge_labels = pos_labels[i]
+            if isinstance(edge_labels, int):
+                edge_label_one_hot[edge_labels] = 1
+            else:
+                for label in edge_labels:
+                    edge_label_one_hot[label] = 1
+            pos_labels[i] = edge_label_one_hot
 
-    return graph, np.array(train_data), np.array(train_labels), np.array(test_data), np.array(test_labels)
+        num_train = int(len(pos_edges) * args.train_ratio)
+        pos_train_edges = pos_edges[:num_train]
+        pos_test_edges = pos_edges[num_train:]
+        pos_train_labels = pos_labels[:num_train]
+        pos_test_labels = pos_labels[num_train:]
+        print(
+            "Num training edges: ",
+            len(pos_train_edges),
+            # len(pos_train_edges) + len(neg_train_edges),
+            "; Num testing edges: ",
+            len(pos_test_edges),
+            # len(pos_test_edges) + len(neg_test_edges)
+        )
+
+        print("Number of edges left: ", graph.number_of_edges())
+
+        # for i in range(len(pos_test_labels)):
+        #     edge_label_one_hot = [0] * num_edge_labels
+        #     edge_label = pos_test_labels[i]
+        #     edge_label_one_hot[edge_label] = 1
+        #     pos_test_labels[i] = edge_label_one_hot
+
+        # for i in range(len(neg_train_labels)):
+        #     edge_label_one_hot = [0] * num_edge_labels
+        #     # edge_label = neg_train_labels[i]
+        #     # edge_label_one_hot[edge_label] = 1
+        #     neg_train_labels[i] = edge_label_one_hot
+        #
+        # for i in range(len(neg_test_labels)):
+        #     edge_label_one_hot = [0] * num_edge_labels
+        #     # edge_label = neg_test_labels[i]
+        #     # edge_label_one_hot[edge_label] = 1
+        #     neg_test_labels[i] = edge_label_one_hot
+
+        train_data = pos_train_edges # + neg_train_edges
+        train_labels = pos_train_labels # + neg_train_labels
+
+        test_data = pos_test_edges # + neg_test_edges
+        test_labels = pos_test_labels # + neg_test_labels
+
+        return graph, np.array(train_data), np.array(train_labels), np.array(test_data), np.array(test_labels)
 
 
 #############################
@@ -209,7 +263,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
         elapsed = time.time() - begin_time
 
-        result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels)
+        result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels, args)
 
         if writer is not None:
             writer.add_scalar("loss/avg_loss", loss.item(), epoch)
@@ -223,10 +277,15 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
                 {"train": result_train["recall"], "test": result_test["recall"]},
                 epoch,
             )
-            writer.add_scalars(
-                "F1", {"train": result_train["F1"], "test": result_test["F1"]}, epoch
-            )
-        if epoch % 10 == 0:
+            if args.single_edge_label:
+                writer.add_scalars(
+                    "acc", {"train": result_train["acc"], "test": result_test["acc"]}, epoch
+                )
+            elif args.multi_label:
+                writer.add_scalars(
+                    "F1", {"train": result_train["F1"], "test": result_test["F1"]}, epoch
+                )
+        if args.single_edge_label and epoch % 10 == 0:
             print(
                 "epoch: ",
                 epoch,
@@ -240,10 +299,35 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
                 result_train["recall"],
                 "; test_recall: ",
                 result_test["recall"],
-                "; train_F1: ",
-                result_train["F1"],
-                "; test_F1: ",
-                result_test["F1"],
+                "; train_acc: ",
+                result_train["acc"],
+                "; test_acc: ",
+                result_test["acc"],
+                "; epoch time: ",
+                "{0:0.2f}".format(elapsed),
+            )
+        elif args.multi_label and epoch % 10 == 0:
+            print(
+                "epoch: ",
+                epoch,
+                "; loss: ",
+                loss.item(),
+                "; train_prec: ",
+                result_train["prec"],
+                "; test_prec: ",
+                result_test["prec"],
+                "; train_recall: ",
+                result_train["recall"],
+                "; test_recall: ",
+                result_test["recall"],
+                # "; train_F1: ",
+                # result_train["F1"],
+                # "; test_F1: ",
+                # result_test["F1"],
+                "; train_AUC: ",
+                result_train["AUC"],
+                "; test_AUC: ",
+                result_test["AUC"],
                 "; epoch time: ",
                 "{0:0.2f}".format(elapsed),
             )
@@ -275,100 +359,147 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 # Evaluate Trained Model
 #
 #############################
-def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labels):
+def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labels, args):
     test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
     ypred_test, adj_att = model(x, adj, test_data)
 
-    ypred_train = ypred_train.detach().numpy()[0]
-    # ypred_train[ypred_train < 0.5] = 0
-    # ypred_train[ypred_train >= 0.5] = 1
-    # ypred_train = ypred_train.astype(int)
+    if args.single_edge_label:
+        _, ypred_train_labels = torch.max(ypred_train, 2)
+        ypred_train_labels = ypred_train_labels.numpy()
 
-    ypred_test = ypred_test.detach().numpy()[0]
-    # ypred_test[ypred_test < 0.5] = 0
-    # ypred_test[ypred_test >= 0.5] = 1
-    # ypred_test = ypred_test.astype(int)
+        _, ypred_test_labels = torch.max(ypred_test, 2)
+        ypred_test_labels = ypred_test_labels.numpy()
 
-    train_labels = train_labels.numpy()[0]
-    test_labels = test_labels.numpy()[0]
+        pred_train = np.ravel(ypred_train_labels)
+        pred_test = np.ravel(ypred_test_labels)
+        labels_train = np.ravel(train_labels)
+        labels_test = np.ravel(test_labels)
 
-    num_classes = ypred_train.shape[1]
-    # For each class
-    precision = dict()
-    recall = dict()
-    threshold = dict()
-    average_precision = dict()
-    for i in range(num_classes):
-        precision[i], recall[i], threshold[i] = metrics.precision_recall_curve(train_labels[:, i], ypred_train[:, i])
-        average_precision[i] = metrics.average_precision_score(train_labels[:, i], ypred_train[:, i])
-    # A "micro-average": quantifying score on all classes jointly
-    # precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(train_labels.ravel(), ypred_train.ravel())
-    # average_precision["micro"] = metrics.average_precision_score(train_labels, ypred_train, average="micro")
-    # average_precision_train = average_precision["micro"]
+        result_train = {
+            "prec": metrics.precision_score(labels_train, pred_train, average="macro"),
+            "recall": metrics.recall_score(labels_train, pred_train, average="macro"),
+            "acc": metrics.accuracy_score(labels_train, pred_train),
+            "conf_mat": metrics.confusion_matrix(labels_train, pred_train),
+        }
+        result_test = {
+            "prec": metrics.precision_score(labels_test, pred_test, average="macro"),
+            "recall": metrics.recall_score(labels_test, pred_test, average="macro"),
+            "acc": metrics.accuracy_score(labels_test, pred_test),
+            "conf_mat": metrics.confusion_matrix(labels_test, pred_test),
+        }
+        return result_train, result_test
 
-    precision_sum = 0.0
-    recall_sum = 0.0
-    for i in range(num_classes):
-        precision_sum += sum(precision[i][:(precision[i].shape[0] - 1)]) / (precision[i].shape[0] - 1)
-        recall_sum += sum(recall[i][:(recall[i].shape[0] - 1)]) / (recall[i].shape[0] - 1)
-    prec_train = precision_sum / num_classes
-    rec_train = recall_sum / num_classes
-    F1_train = 2 * prec_train * rec_train / (prec_train + rec_train)
+    elif args.multi_label:
+        ypred_train = ypred_train.detach().numpy()[0]
+        # ypred_train[ypred_train < 0.5] = 0
+        # ypred_train[ypred_train >= 0.5] = 1
+        # ypred_train = ypred_train.astype(int)
 
-    # For each class
-    precision = dict()
-    recall = dict()
-    threshold = dict()
-    average_precision = dict()
-    for i in range(num_classes):
-        precision[i], recall[i], threshold[i] = metrics.precision_recall_curve(test_labels[:, i], ypred_test[:, i])
-        average_precision[i] = metrics.average_precision_score(test_labels[:, i], ypred_test[:, i])
-    # # A "micro-average": quantifying score on all classes jointly
-    # precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(test_labels.ravel(), ypred_test.ravel())
-    # average_precision["micro"] = metrics.average_precision_score(test_labels, ypred_test, average="micro")
-    # average_precision_test = average_precision["micro"]
+        ypred_test = ypred_test.detach().numpy()[0]
+        # ypred_test[ypred_test < 0.5] = 0
+        # ypred_test[ypred_test >= 0.5] = 1
+        # ypred_test = ypred_test.astype(int)
 
-    precision_sum = 0.0
-    recall_sum = 0.0
-    for i in range(num_classes):
-        precision_sum += sum(precision[i][:(precision[i].shape[0] - 1)]) / (precision[i].shape[0] - 1)
-        recall_sum += sum(recall[i][:(recall[i].shape[0] - 1)]) / (recall[i].shape[0] - 1)
-    prec_test = precision_sum / num_classes
-    rec_test = recall_sum / num_classes
-    F1_test = 2 * prec_test * rec_test / (prec_test + rec_test)
+        train_labels = train_labels.numpy()[0]
+        test_labels = test_labels.numpy()[0]
 
-    result_train = {
-        "prec": prec_train,
-        "recall": rec_train,
-        "F1": F1_train,
-    }
-    result_test = {
-        "prec": prec_test,
-        "recall": rec_test,
-        "F1": F1_test,
-    }
-    return result_train, result_test
+        num_classes = ypred_train.shape[1]
+        # For each class
+        precision = dict()
+        recall = dict()
+        threshold = dict()
+        average_precision = dict()
+        for i in range(num_classes):
+            precision[i], recall[i], threshold[i] = metrics.precision_recall_curve(train_labels[:, i], ypred_train[:, i])
+            average_precision[i] = metrics.average_precision_score(train_labels[:, i], ypred_train[:, i])
+        # A "micro-average": quantifying score on all classes jointly
+        # precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(train_labels.ravel(), ypred_train.ravel())
+        # average_precision["micro"] = metrics.average_precision_score(train_labels, ypred_train, average="micro")
+        # average_precision_train = average_precision["micro"]
+
+        precision_sum = 0.0
+        recall_sum = 0.0
+        for i in range(num_classes):
+            precision_sum += sum(precision[i][:(precision[i].shape[0] - 1)]) / (precision[i].shape[0] - 1)
+            recall_sum += sum(recall[i][:(recall[i].shape[0] - 1)]) / (recall[i].shape[0] - 1)
+        prec_train = precision_sum / num_classes
+        rec_train = recall_sum / num_classes
+        F1_train = 2 * prec_train * rec_train / (prec_train + rec_train)
+
+        # For each class
+        precision = dict()
+        recall = dict()
+        threshold = dict()
+        average_precision = dict()
+        for i in range(num_classes):
+            precision[i], recall[i], threshold[i] = metrics.precision_recall_curve(test_labels[:, i], ypred_test[:, i])
+            average_precision[i] = metrics.average_precision_score(test_labels[:, i], ypred_test[:, i])
+        # # A "micro-average": quantifying score on all classes jointly
+        # precision["micro"], recall["micro"], _ = metrics.precision_recall_curve(test_labels.ravel(), ypred_test.ravel())
+        # average_precision["micro"] = metrics.average_precision_score(test_labels, ypred_test, average="micro")
+        # average_precision_test = average_precision["micro"]
+
+        precision_sum = 0.0
+        recall_sum = 0.0
+        for i in range(num_classes):
+            precision_sum += sum(precision[i][:(precision[i].shape[0] - 1)]) / (precision[i].shape[0] - 1)
+            recall_sum += sum(recall[i][:(recall[i].shape[0] - 1)]) / (recall[i].shape[0] - 1)
+        prec_test = precision_sum / num_classes
+        rec_test = recall_sum / num_classes
+        F1_test = 2 * prec_test * rec_test / (prec_test + rec_test)
+
+        # auc_train = metrics.roc_curve(train_labels.ravel(), ypred_train.ravel())
+        # auc_test = metrics.roc_curve(test_labels.ravel(), ypred_test.ravel())
+        auc_train = metrics.roc_auc_score(train_labels, ypred_train)
+        auc_test = metrics.roc_auc_score(test_labels, ypred_test)
+
+        result_train = {
+            "prec": prec_train,
+            "recall": rec_train,
+            "F1": F1_train,
+            "AUC": auc_train,
+        }
+        result_test = {
+            "prec": prec_test,
+            "recall": rec_test,
+            "F1": F1_test,
+            "AUC": auc_test,
+        }
+        return result_train, result_test
 
 
 def link_prediction_task(args, writer=None):
     graph, node_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
-        args.datadir, args.dataset
+        args.datadir, args.dataset, args.multi_label
     )
     input_dim = graph.graph["feat_dim"]
 
     graph, train_data, train_labels, test_data, test_labels = prepare_data(graph, num_edge_labels, args)
 
-    model = models.GcnEncoderNode(
-        input_dim,
-        args.hidden_dim,
-        args.output_dim,
-        num_edge_labels,
-        args.num_gc_layers,
-        bn=args.bn,
-        dropout=args.dropout,
-        args=args,
-    )
+    model = None
+    if args.single_edge_label:
+        model = models.GcnEncoderNode(
+            input_dim,
+            args.hidden_dim,
+            args.output_dim,
+            2,
+            args.num_gc_layers,
+            bn=args.bn,
+            dropout=args.dropout,
+            args=args,
+        )
+    elif args.multi_label:
+        model = models.GcnEncoderNode(
+            input_dim,
+            args.hidden_dim,
+            args.output_dim,
+            num_edge_labels,
+            args.num_gc_layers,
+            bn=args.bn,
+            dropout=args.dropout,
+            args=args,
+        )
 
     train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
 
