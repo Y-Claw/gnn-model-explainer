@@ -141,19 +141,25 @@ def arg_parse():
 
     parser.add_argument('--link_prediction', dest='link_prediction',
                         help='whether do link prediction task')
+    parser.add_argument('--directed_graph', dest='directed_graph',
+                        help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
     parser.add_argument('--multi_label', dest='multi_label',
                         help='whether multi label classification for link prediction')
+    parser.add_argument('--n_hops', dest='n_hops',
+                        help='n hops neighboors')
 
     # TODO: Check argument usage
     parser.set_defaults(
         logdir="log",
         ckptdir="ckpt",
         dataset="USAir",
+        directed_graph=True,
         link_prediction=True,
         single_edge_label=True,
         multi_label=False,
+        n_hops=1,
         opt="adam",  
         opt_scheduler="none",
         cuda="0",

@@ -72,7 +72,7 @@ class Explainer:
         self.train_idx = train_idx
         self.test_idx = test_idx
         # self.n_hops = args.num_gc_layers
-        self.n_hops = 1
+        self.n_hops = args.n_hops
         self.graph_mode = graph_mode
         self.graph_idx = graph_idx
         self.neighborhoods = None if self.graph_mode else graph_utils.neighborhoods(adj=self.adj, n_hops=self.n_hops, use_cuda=use_cuda)
@@ -104,12 +104,12 @@ class Explainer:
         src_denoise_res = []
         dst_denoise_res = []
 
-        labels = self.test_labels[:, :10]
-        edges = self.test_idx[:10]
-        pred = self.pred_test[:, :10]
-        # labels = self.train_labels[:, :10]
-        # pred = self.pred_train[:, :10]
-        # edges = self.train_idx[:10]
+        labels = np.concatenate((self.test_labels[:, :int(self.test_labels.shape[1] / 2)],
+                                 self.train_labels[:, :int(self.train_labels.shape[1] / 2)]), axis=1)
+        edges = np.concatenate((self.test_idx[:int(self.test_labels.shape[1] / 2)],
+                                self.train_idx[:int(self.train_labels.shape[1] / 2)]), axis=0)
+        pred = np.concatenate((self.pred_test[:, :int(self.test_labels.shape[1] / 2)],
+                               self.pred_train[:, :int(self.train_labels.shape[1] / 2)]), axis=1)
 
         for index in range(edges.shape[0]):
             src_idx = edges[index][0]
@@ -125,26 +125,32 @@ class Explainer:
             src_explain_res.append(src_results)
             dst_explain_res.append(dst_results)
 
-            src_sub_feat = src_results["src_sub_feat"]
+            src_masked_feat = src_results["src_sub_feat"]
             src_masked_adj = src_results["src_masked_adj"]
             src_idx_new = src_results["src_idx_new"]
             src_neighbors = src_results["src_neighbors"]
 
-            dst_sub_feat = dst_results["dst_sub_feat"]
+            dst_masked_feat = dst_results["dst_sub_feat"]
             dst_masked_adj = dst_results["dst_masked_adj"]
             dst_idx_new = dst_results["dst_idx_new"]
             dst_neighbors = dst_results["dst_neighbors"]
 
             src_denoise_result = io_utils.denoise_adj_feat(
-                self.graph, src_masked_adj, src_idx_new, src_sub_feat, src_neighbors,
-                edge_threshold=0.001, feat_threshold=0.001
+                self.graph, src_masked_adj, src_idx_new, src_masked_feat, src_neighbors,
+                edge_threshold=0.1, feat_threshold=0.001, edge_num_threshold=10, args=args
             )
+            if src_denoise_result is None:
+                continue
             dst_denoise_result = io_utils.denoise_adj_feat(
-                self.graph, dst_masked_adj, dst_idx_new, dst_sub_feat, dst_neighbors,
-                edge_threshold=0.0001, feat_threshold=0.001
+                self.graph, dst_masked_adj, dst_idx_new, dst_masked_feat, dst_neighbors,
+                edge_threshold=0.1, feat_threshold=0.001, edge_num_threshold=10, args=args
             )
+            if dst_denoise_result is None:
+                continue
             src_denoise_res.append(src_denoise_result)
             dst_denoise_res.append(dst_denoise_result)
+
+            io_utils.combine_src_dst_explanations(self.graph, index, src_idx, dst_idx, link_label, src_denoise_result, dst_denoise_result, args)
 
         return src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res
 
@@ -290,10 +296,12 @@ class Explainer:
                 explainer.dst_masked_adj[0].cpu().detach().numpy() * dst_adj[0].cpu().detach().numpy()
             )
             src_sub_feat = (
-                explainer.src_feat_mask.cpu().detach().numpy() * src_x[0].cpu().detach().numpy()
+                torch.sigmoid(explainer.src_feat_mask).cpu().detach().numpy() * src_x[0].cpu().detach().numpy()
+                # explainer.src_feat_mask.cpu().detach().numpy() * src_x[0].cpu().detach().numpy()
             )
             dst_sub_feat = (
-                explainer.dst_feat_mask.cpu().detach().numpy() * dst_x[0].cpu().detach().numpy()
+                torch.sigmoid(explainer.dst_feat_mask).cpu().detach().numpy() * dst_x[0].cpu().detach().numpy()
+                # explainer.dst_feat_mask.cpu().detach().numpy() * dst_x[0].cpu().detach().numpy()
             )
         # else:
         #     adj_atts = nn.functional.sigmoid(adj_atts).squeeze()
@@ -1040,7 +1048,10 @@ class ExplainModule(nn.Module):
             # gt_label_node = self.label if self.graph_mode else self.label[0][node_idx]
             # logit = pred[gt_label_node]
             # pred_loss = -torch.log(logit)
-            pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
+            if self.args.single_edge_label:
+                pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
+            elif self.args.multi_label:
+                pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())
         # size
         src_mask = self.src_mask
         dst_mask = self.dst_mask

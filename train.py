@@ -218,6 +218,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
     num_nodes = G.number_of_nodes()
 
+    # adj_origin = nx.adjacency_matrix(G)
     adj_origin = nx.to_numpy_array(G)
     # adj_origin = [[0] * num_nodes] * num_nodes
     # adj_origin = np.array(adj_origin)

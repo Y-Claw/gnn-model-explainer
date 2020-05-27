@@ -191,7 +191,7 @@ def log_matrix(writer, mat, name, epoch, fig_size=(8, 6), dpi=200):
     writer.add_image(name, tensorboardX.utils.figure_to_image(fig), epoch)
 
 
-def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=0.1, feat_threshold=0.1):
+def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=None, feat_threshold=None, edge_num_threshold=None, args=None):
     """Cleaning a graph by thresholding its node values.
 
     Args:
@@ -206,21 +206,31 @@ def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=0.1, 
     num_nodes = adj.shape[0]
 
     if edge_threshold is None:
-        threshold = 1e-6
+        edge_threshold = 1e-6
+    if feat_threshold is None:
+        feat_threshold = 1e-6
+    if edge_num_threshold is not None:
+        # this is for symmetric graphs: edges are repeated twice in adj
+        adj_threshold_num = edge_num_threshold * 2  # undirected graph
+        if args.directed_graph is True:
+            adj_threshold_num = edge_num_threshold
+        # adj += np.random.rand(adj.shape[0], adj.shape[1]) * 1e-4
+        neigh_size = len(adj[adj > 0])
+        if neigh_size == 0:
+            return None
+        threshold_num = min(neigh_size, adj_threshold_num)
+        edge_threshold = np.sort(adj[adj > 0])[-threshold_num]
 
     reserved_edge_list = []
     reserved_node_list = []
-    map = {}
     for i in range(num_nodes):
         for j in range(num_nodes):
             if adj[i, j] < edge_threshold:
                 continue
             src_idx = neighbors[j]
             dst_idx = neighbors[i]
-            map[src_idx] = j
-            map[dst_idx] = i
-            reserved_node_list.append(src_idx)
-            reserved_node_list.append(dst_idx)
+            reserved_node_list.append(i)
+            reserved_node_list.append(j)
             if len(graph[src_idx][dst_idx]) == 1:
                 reserved_edge_list.append((src_idx, dst_idx, graph[src_idx][dst_idx][0]["label"]))
             else:
@@ -229,15 +239,14 @@ def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=0.1, 
     if len(reserved_node_list) == 0:
         return None
     reserved_nodes = np.unique(reserved_node_list)
+    reserved_feat = feat[reserved_nodes]
+
+    reserved_nodes = neighbors[reserved_nodes]   # idx -> original id in graph
+    if neighbors[node_idx] not in reserved_nodes:
+        return None
     node_idx_new = np.where(reserved_nodes == neighbors[node_idx])[0][0]
 
-    idx = []
-    for node in reserved_nodes:
-        idx.append(map[node])
-    reserved_feat = feat[idx]
-
-    if feat_threshold is None:
-        feat_threshold = 1e-6
+    feat_threshold = 0.5
     reserved_feat = torch.sigmoid(torch.tensor(reserved_feat)).detach().numpy()
     reserved_feat[reserved_feat >= feat_threshold] = 1
     reserved_feat[reserved_feat < feat_threshold] = 0
@@ -248,7 +257,76 @@ def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=0.1, 
         "reserved_feat": reserved_feat,
         "node_idx_new": node_idx_new,
     }
+
     return denoise_result
+
+
+def combine_src_dst_explanations(
+        graph, index, src_idx, dst_idx, link_label, src_denoise_result, dst_denoise_result, args
+):
+    # 1. combine explanations for src and dst in link(src, dst)
+    pattern_nodes = np.concatenate((src_denoise_result["reserved_nodes"], dst_denoise_result["reserved_nodes"]), axis=0)
+    pattern_edges = src_denoise_result["reserved_edge_list"] + dst_denoise_result["reserved_edge_list"]
+    src_features = src_denoise_result["reserved_feat"]
+    dst_features = dst_denoise_result["reserved_feat"]
+    pattern_edges = np.unique(pattern_edges, axis=0)
+
+    oid2newid_src = {}
+    oid2newid_dst = {}
+    for i in range(src_denoise_result["reserved_nodes"].shape[0]):
+        oid2newid_src[src_denoise_result["reserved_nodes"][i]] = i
+    for j in range(dst_denoise_result["reserved_nodes"].shape[0]):
+        oid2newid_dst[dst_denoise_result["reserved_nodes"][j]] = j
+
+    # 2. renumber.
+    pattern_nodes = filter(lambda x: x != src_idx and x != dst_idx, pattern_nodes)
+    pattern_nodes = [i for i in pattern_nodes]
+    pattern_nodes = np.unique(pattern_nodes)
+    map_nodes = {}
+    map_nodes[src_idx] = 0
+    map_nodes[dst_idx] = 1
+    for i in range(pattern_nodes.shape[0]):
+        map_nodes[pattern_nodes[i]] = i + 2
+
+    # 3. write the explanation results into file.
+    path = "explanations/"
+    src_label = graph.nodes()[src_idx]["label"]
+    dst_label = graph.nodes()[dst_idx]["label"]
+    suffix = str(src_label) + "_" + str(dst_label)
+    if args.single_edge_label:
+        suffix = suffix + "_0"
+    elif args.multi_label:
+        non_zero_idx = np.where(link_label == 1)[0]
+        if non_zero_idx.shape[0] == 1:
+            suffix = suffix + "_" + str(non_zero_idx[0])
+        else:
+            for tmp_index in non_zero_idx:
+                print("unsolve!")  # under solve!
+
+    with open(path + args.dataset + ".explaination_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
+        f.write("#\t" + str(index) + "\n")
+        for node_oid, node_id in map_nodes.items():
+            f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[node_id]["label"]))
+            important_attr = []
+            if node_oid in oid2newid_src.keys():
+                node_oid_feat = src_features[oid2newid_src[node_oid]]
+                for i in range(node_oid_feat.shape[0]):
+                    if node_oid_feat[i] == 1:
+                        important_attr.append(i)
+            if node_oid in oid2newid_dst.keys():
+                node_oid_feat = dst_features[oid2newid_dst[node_oid]]
+                for i in range(node_oid_feat.shape[0]):
+                    if node_oid_feat[i] == 1:
+                        important_attr.append(i)
+            important_attr = np.unique(important_attr)
+            for attr_id in important_attr:
+                f.write("\t" + str(attr_id))
+            f.write("\n")
+        # for node_id in range(len(map_nodes)):
+        #     f.write("v\t" + str(node_id) + "\t" + str(self.graph.nodes()[node_id]["label"]) + "\n")
+        for edge in pattern_edges:
+            f.write("e\t" + str(map_nodes[edge[0]]) + "\t" + str(map_nodes[edge[1]]) + "\t" + str(edge[2]) + "\n")
+    f.close()
 
 
 def denoise_graph(adj, node_idx, feat=None, label=None, threshold=None, threshold_num=None, max_component=True):
