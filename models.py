@@ -360,10 +360,11 @@ class GcnEncoderNode(GcnEncoderGraph):
         else:
             if args.multi_label:
                 self.bceloss = nn.BCELoss()
-            else:
+            elif args.single_edge_label or args.multi_class:
                 self.celoss = nn.CrossEntropyLoss()
         self.single_edge_label = args.single_edge_label
         self.multi_label = args.multi_label
+        self.multi_class = args.multi_class
 
     def forward(self, x, adj, train_edges, x2=None, adj2=None, batch_num_nodes=None, **kwargs):
         # mask
@@ -417,7 +418,7 @@ class GcnEncoderNode(GcnEncoderGraph):
             return pred, adj_att, adj_att2
 
     def loss(self, pred, label):
-        if self.single_edge_label:
+        if self.single_edge_label or self.multi_class:
             pred = torch.transpose(pred, 1, 2)
             return self.celoss(pred, label)
         elif self.multi_label:

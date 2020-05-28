@@ -43,14 +43,14 @@ import models
 # Prepare Data
 #
 #############################
-def prepare_data(graph, num_edge_labels, args, test_graphs=None):
+def prepare_data(graph, num_edge_labels, args):
     edges = list(graph.edges())
     num_edges = len(edges)
     num_nodes = graph.number_of_nodes()
     num_train = int(num_edges * args.fraction * args.train_ratio)
     num_test = int(num_edges * args.fraction * (1 - args.train_ratio))
 
-    if args.single_edge_label:
+    if args.single_edge_label:      # only one type of edges in the graph
         # generate positive data
         idx = [i for i in range(num_edges)]
         np.random.shuffle(idx)
@@ -102,7 +102,7 @@ def prepare_data(graph, num_edge_labels, args, test_graphs=None):
 
         return graph, np.array(train_data), np.array(train_labels), np.array(test_data), np.array(test_labels)
 
-    if args.multi_label: # multi-label, multi-class
+    elif args.multi_label or args.multi_class:  # multi-type of edges in the graph
         # generate negative data
         # num_nodes = graph.number_of_nodes()
         # neg_data = []
@@ -154,16 +154,17 @@ def prepare_data(graph, num_edge_labels, args, test_graphs=None):
                     pos_labels[len(pos_labels) - 1].append(graph[src][dst][i]['label'])
                     graph.remove_edge(src, dst)       # in a pop way
 
-        # change edge labels into one-hop form
-        for i in range(len(pos_labels)):
-            edge_label_one_hot = [0] * num_edge_labels
-            edge_labels = pos_labels[i]
-            if isinstance(edge_labels, int):
-                edge_label_one_hot[edge_labels] = 1
-            else:
-                for label in edge_labels:
-                    edge_label_one_hot[label] = 1
-            pos_labels[i] = edge_label_one_hot
+        if args.multi_label:
+            # change edge labels into one-hop form
+            for i in range(len(pos_labels)):
+                edge_label_one_hot = [0] * num_edge_labels
+                edge_labels = pos_labels[i]
+                if isinstance(edge_labels, int):
+                    edge_label_one_hot[edge_labels] = 1
+                else:
+                    for label in edge_labels:
+                        edge_label_one_hot[label] = 1
+                pos_labels[i] = edge_label_one_hot
 
         num_train = int(len(pos_edges) * args.train_ratio)
         pos_train_edges = pos_edges[:num_train]
@@ -171,39 +172,19 @@ def prepare_data(graph, num_edge_labels, args, test_graphs=None):
         pos_train_labels = pos_labels[:num_train]
         pos_test_labels = pos_labels[num_train:]
         print(
-            "Num training edges: ",
+            "Num pos training edges: ",
             len(pos_train_edges),
-            # len(pos_train_edges) + len(neg_train_edges),
-            "; Num testing edges: ",
+            "; Num pos testing edges: ",
             len(pos_test_edges),
-            # len(pos_test_edges) + len(neg_test_edges)
         )
 
-        print("Number of edges left: ", graph.number_of_edges())
+        print("Number of edges left in Graph: ", graph.number_of_edges())
 
-        # for i in range(len(pos_test_labels)):
-        #     edge_label_one_hot = [0] * num_edge_labels
-        #     edge_label = pos_test_labels[i]
-        #     edge_label_one_hot[edge_label] = 1
-        #     pos_test_labels[i] = edge_label_one_hot
+        train_data = pos_train_edges  # + neg_train_edges
+        train_labels = pos_train_labels  # + neg_train_labels
 
-        # for i in range(len(neg_train_labels)):
-        #     edge_label_one_hot = [0] * num_edge_labels
-        #     # edge_label = neg_train_labels[i]
-        #     # edge_label_one_hot[edge_label] = 1
-        #     neg_train_labels[i] = edge_label_one_hot
-        #
-        # for i in range(len(neg_test_labels)):
-        #     edge_label_one_hot = [0] * num_edge_labels
-        #     # edge_label = neg_test_labels[i]
-        #     # edge_label_one_hot[edge_label] = 1
-        #     neg_test_labels[i] = edge_label_one_hot
-
-        train_data = pos_train_edges # + neg_train_edges
-        train_labels = pos_train_labels # + neg_train_labels
-
-        test_data = pos_test_edges # + neg_test_edges
-        test_labels = pos_test_labels # + neg_test_labels
+        test_data = pos_test_edges  # + neg_test_edges
+        test_labels = pos_test_labels  # + neg_test_labels
 
         return graph, np.array(train_data), np.array(train_labels), np.array(test_data), np.array(test_labels)
 
@@ -225,7 +206,9 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     # edges = list(G.edges())
     # for edge in edges:
     #     adj_origin[edge[0]][edge[1]] += 1
-    adj = adj_origin.transpose()   # for collecting information from in-edges during 'forward' in GraphConv class.
+    adj = adj_origin.transpose()
+    # Transpose to collect information from in-edges during 'forward' in GraphConv class when graph is directed.
+    # For undirected graph, transpose or not transpose do not change anything.
 
     existing_node = list(G.nodes)[-1]
     feat_dim = G.nodes[existing_node]["feat"].shape[0]
@@ -264,7 +247,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
         elapsed = time.time() - begin_time
 
-        result_train, result_test = evaluate_node(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels, args)
+        result_train, result_test = evaluate_link(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels, args)
 
         if writer is not None:
             writer.add_scalar("loss/avg_loss", loss.item(), epoch)
@@ -278,7 +261,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
                 {"train": result_train["recall"], "test": result_test["recall"]},
                 epoch,
             )
-            if args.single_edge_label:
+            if args.single_edge_label or args.multi_class:
                 writer.add_scalars(
                     "acc", {"train": result_train["acc"], "test": result_test["acc"]}, epoch
                 )
@@ -286,7 +269,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
                 writer.add_scalars(
                     "F1", {"train": result_train["F1"], "test": result_test["F1"]}, epoch
                 )
-        if args.single_edge_label and epoch % 10 == 0:
+        if (args.single_edge_label or args.multi_class) and epoch % 10 == 0:
             print(
                 "epoch: ",
                 epoch,
@@ -360,12 +343,12 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 # Evaluate Trained Model
 #
 #############################
-def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labels, args):
+def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labels, args):
     test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
     ypred_test, adj_att = model(x, adj, test_data)
 
-    if args.single_edge_label:
+    if args.single_edge_label or args.multi_class:
         _, ypred_train_labels = torch.max(ypred_train, 2)
         ypred_train_labels = ypred_train_labels.numpy()
 
@@ -472,7 +455,7 @@ def evaluate_node(model, adj, x, test_data, test_labels, ypred_train, train_labe
 
 def link_prediction_task(args, writer=None):
     graph, node_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
-        args.datadir, args.dataset, args.multi_label
+        args.datadir, args.dataset, args
     )
     input_dim = graph.graph["feat_dim"]
 
@@ -484,13 +467,13 @@ def link_prediction_task(args, writer=None):
             input_dim,
             args.hidden_dim,
             args.output_dim,
-            2,
+            2,   # binary classification for link prediction.
             args.num_gc_layers,
             bn=args.bn,
             dropout=args.dropout,
             args=args,
         )
-    elif args.multi_label:
+    elif args.multi_label or args.multi_class:
         model = models.GcnEncoderNode(
             input_dim,
             args.hidden_dim,

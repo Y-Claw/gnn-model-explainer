@@ -39,6 +39,7 @@ FloatTensor = torch.cuda.FloatTensor if use_cuda else torch.FloatTensor
 LongTensor = torch.cuda.LongTensor if use_cuda else torch.LongTensor
 Tensor = FloatTensor
 
+
 class Explainer:
     def __init__(
         self,
@@ -80,10 +81,10 @@ class Explainer:
         self.writer = writer
         self.print_training = print_training
 
-    def extract_neighborhood_in_directed_graph(self, node_idx, graph_idx=0):
-        """Returns the neighborhood of a given ndoe."""
-        neighbors_adj_row = self.neighborhoods[graph_idx][node_idx, :]          # in-edges
-        neighbors_adj_column = self.neighborhoods[graph_idx][:, node_idx]       # out-edges
+    def extract_n_hops_neighborhood(self, node_idx):  # works for directed and undirected graph
+        """Returns the n_hops neighborhood of a given ndoe."""
+        neighbors_adj_row = self.neighborhoods[0][node_idx, :]          # in-edges
+        neighbors_adj_column = self.neighborhoods[0][:, node_idx]       # out-edges
         n1 = np.nonzero(neighbors_adj_row)[0]
         n2 = np.nonzero(neighbors_adj_column)[0]
         neighbors = np.concatenate((n1, n2))
@@ -91,8 +92,8 @@ class Explainer:
         neighbors = np.unique(neighbors)
 
         node_idx_new = np.where(neighbors == node_idx)[0][0]
-        sub_adj = self.adj[graph_idx][neighbors][:, neighbors]
-        sub_feat = self.feat[graph_idx, neighbors]
+        sub_adj = self.adj[0][neighbors][:, neighbors]
+        sub_feat = self.feat[0, neighbors]
         sub_node_label = self.node_labels[:, neighbors]
 
         return node_idx_new, sub_adj, sub_feat, sub_node_label, neighbors
@@ -104,12 +105,19 @@ class Explainer:
         src_denoise_res = []
         dst_denoise_res = []
 
-        labels = np.concatenate((self.test_labels[:, :int(self.test_labels.shape[1] / 2)],
-                                 self.train_labels[:, :int(self.train_labels.shape[1] / 2)]), axis=1)
-        edges = np.concatenate((self.test_idx[:int(self.test_labels.shape[1] / 2)],
-                                self.train_idx[:int(self.train_labels.shape[1] / 2)]), axis=0)
-        pred = np.concatenate((self.pred_test[:, :int(self.test_labels.shape[1] / 2)],
-                               self.pred_train[:, :int(self.train_labels.shape[1] / 2)]), axis=1)
+        # all positive links
+        labels = edges = pred = None
+        if args.single_edge_label:
+            labels = np.concatenate((self.test_labels[:, :int(self.test_labels.shape[1] / 2)],
+                                    self.train_labels[:, :int(self.train_labels.shape[1] / 2)]), axis=1)
+            edges = np.concatenate((self.test_idx[:int(self.test_labels.shape[1] / 2)],
+                                    self.train_idx[:int(self.train_labels.shape[1] / 2)]), axis=0)
+            pred = np.concatenate((self.pred_test[:, :int(self.test_labels.shape[1] / 2)],
+                                    self.pred_train[:, :int(self.train_labels.shape[1] / 2)]), axis=1)
+        elif args.multi_label or args.multi_class:
+            labels = np.concatenate((self.test_labels, self.train_labels), axis=1)
+            edges = np.concatenate((self.test_idx, self.train_idx), axis=0)
+            pred = np.concatenate((self.pred_test, self.pred_train), axis=1)
 
         for index in range(edges.shape[0]):
             src_idx = edges[index][0]
@@ -157,16 +165,10 @@ class Explainer:
     def explain_link(self, src_idx, dst_idx, link_label, pred_label, args, unconstrained=False, model="exp"):
         """Explain link prediction for a single node pair
         """
-        # index = 1
-        # src_idx = self.train_idx[index][0]
-        # dst_idx = self.train_idx[index][1]
-        # link_label = self.train_labels[0][index]
-        # print("src node label: ", self.node_labels[0][src_idx])
-        # print("dst node label: ", self.node_labels[0][dst_idx])
-        src_idx_new, src_adj, src_sub_feat, src_sub_label, src_neighbors = self.extract_neighborhood_in_directed_graph(
+        src_idx_new, src_adj, src_sub_feat, src_sub_label, src_neighbors = self.extract_n_hops_neighborhood(
             src_idx
         )
-        dst_idx_new, dst_adj, dst_sub_feat, dst_sub_label, dst_neighbors = self.extract_neighborhood_in_directed_graph(
+        dst_idx_new, dst_adj, dst_sub_feat, dst_sub_label, dst_neighbors = self.extract_n_hops_neighborhood(
             dst_idx
         )
         src_adj = np.expand_dims(src_adj, axis=0)
@@ -180,16 +182,8 @@ class Explainer:
         dst_adj = torch.tensor(dst_adj, dtype=torch.float)
         dst_x = torch.tensor(dst_sub_feat, requires_grad=True, dtype=torch.float)
 
-        if args.multi_label:
-            link_label = link_label.tolist()
-            link_label = np.expand_dims(link_label, axis=0)
-            link_label = torch.tensor(link_label, dtype=torch.long)
         print("link label:", link_label)
 
-        # pred_label = self.pred_train[:, index]
-        if args.multi_label:
-            pred_label[pred_label < 0.5] = 0
-            pred_label[pred_label >= 0.5] = 1
         pred_label = torch.tensor(pred_label)
         print("link predicted label: ", pred_label)
 
@@ -239,7 +233,6 @@ class Explainer:
                     "; pred: ",
                     ypred,
                 )
-            # single_subgraph_label = sub_label.squeeze()
 
             if self.writer is not None:
                     self.writer.add_scalar("mask/src_density", src_mask_density, epoch)
@@ -308,7 +301,7 @@ class Explainer:
         #     masked_adj = adj_atts.cpu().detach().numpy() * sub_adj.squeeze()
         #
         fname = 'masked_adj_' + io_utils.gen_explainer_prefix(self.args) + (
-                'src_idx_'+str(src_idx)+'dst_idx_'+str(dst_idx)+'graph_idx_'+str(self.graph_idx)+'.npy')
+                'src_idx_'+str(src_idx)+'dst_idx_'+str(dst_idx)+'.npy')
         with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
             np.save(outfile, np.asarray(src_masked_adj.copy()))
             np.save(outfile, np.asarray(dst_masked_adj.copy()))
@@ -1041,6 +1034,7 @@ class ExplainModule(nn.Module):
             pred_label: the label predicted by the original model.
         """
         mi_obj = False
+        pred_loss = 0
         if mi_obj:
             pred_loss = -torch.sum(pred * torch.log(pred))
         else:
@@ -1048,7 +1042,7 @@ class ExplainModule(nn.Module):
             # gt_label_node = self.label if self.graph_mode else self.label[0][node_idx]
             # logit = pred[gt_label_node]
             # pred_loss = -torch.log(logit)
-            if self.args.single_edge_label:
+            if self.args.single_edge_label or self.args.multi_class:
                 pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
             elif self.args.multi_label:
                 pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())

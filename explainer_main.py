@@ -145,6 +145,8 @@ def arg_parse():
                         help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
+    parser.add_argument('--multi_class', dest='multi_class',
+                        help='whether multi class classification for link prediction')
     parser.add_argument('--multi_label', dest='multi_label',
                         help='whether multi label classification for link prediction')
     parser.add_argument('--n_hops', dest='n_hops',
@@ -154,10 +156,11 @@ def arg_parse():
     parser.set_defaults(
         logdir="log",
         ckptdir="ckpt",
-        dataset="USAir",
+        dataset="USAir",                # test-multi_class
         directed_graph=True,
         link_prediction=True,
-        single_edge_label=True,
+        single_edge_label=True,         # False
+        multi_class=False,              # True
         multi_label=False,
         n_hops=1,
         opt="adam",  
@@ -207,7 +210,7 @@ def main():
 
     # Load a model checkpoint
     ckpt = io_utils.load_ckpt(prog_args)
-    cg_dict = ckpt["cg"] # get computation graph
+    cg_dict = ckpt["cg"]  # get computation graph
     input_dim = cg_dict["feat"].shape[2] 
     num_classes = cg_dict["pred_train"].shape[2]
     print("Loaded model from {}".format(prog_args.ckptdir))
@@ -255,37 +258,12 @@ def main():
     # TODO: API should definitely be cleaner
     # Let's define exactly which modes we support 
     # We could even move each mode to a different method (even file)
-    if prog_args.explain_node is not None:
-        explainer.explain(prog_args.explain_node, unconstrained=False)
-
-    elif prog_args.link_prediction == True:
-        if prog_args.multinode_class >= 0:
-            print(cg_dict["label_test"])
-            # only run for nodes with label specified by multinode_class
-            labels = cg_dict["label_test"][0]  # already numpy matrix
-
-            node_indices = []
-            for i, l in enumerate(labels):
-                if len(node_indices) > 4:
-                    break
-                if l == prog_args.multinode_class:
-                    node_indices.append(i)
-            print(
-                "Node indices for label ",
-                prog_args.multinode_class,
-                " : ",
-                node_indices,
-            )
-            explainer.explain_nodes(node_indices, prog_args)
-
-        else:
-            src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res = explainer.explain_a_set_of_links(
-                prog_args
-            )
-            # explain a set of nodes, one by one
-            # masked_adj = explainer.explain_nodes_gnn_stats(
-            #     range(400, 700, 5), prog_args
-            # )
+    if prog_args.link_prediction is True:
+        print("begin explaining a set of links one by one...")
+        src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res = explainer.explain_a_set_of_links(
+            prog_args
+        )
+        print("finish explaining all links.")
 
 
 if __name__ == "__main__":

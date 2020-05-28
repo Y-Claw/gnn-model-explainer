@@ -293,40 +293,42 @@ def combine_src_dst_explanations(
     src_label = graph.nodes()[src_idx]["label"]
     dst_label = graph.nodes()[dst_idx]["label"]
     suffix = str(src_label) + "_" + str(dst_label)
+    link_type_set = []  # link type
     if args.single_edge_label:
-        suffix = suffix + "_0"
+        link_type_set.append(0)
+    elif args.multi_class:
+        link_type_set.append(link_label)
     elif args.multi_label:
-        non_zero_idx = np.where(link_label == 1)[0]
-        if non_zero_idx.shape[0] == 1:
-            suffix = suffix + "_" + str(non_zero_idx[0])
-        else:
-            for tmp_index in non_zero_idx:
-                print("unsolve!")  # under solve!
+        non_zero_idx = np.where(link_label == 1)[0]  # one-hot
+        for tmp_index in non_zero_idx:
+            link_type_set.append(tmp_index)
 
-    with open(path + args.dataset + ".explaination_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
-        f.write("#\t" + str(index) + "\n")
-        for node_oid, node_id in map_nodes.items():
-            f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[node_id]["label"]))
-            important_attr = []
-            if node_oid in oid2newid_src.keys():
-                node_oid_feat = src_features[oid2newid_src[node_oid]]
-                for i in range(node_oid_feat.shape[0]):
-                    if node_oid_feat[i] == 1:
-                        important_attr.append(i)
-            if node_oid in oid2newid_dst.keys():
-                node_oid_feat = dst_features[oid2newid_dst[node_oid]]
-                for i in range(node_oid_feat.shape[0]):
-                    if node_oid_feat[i] == 1:
-                        important_attr.append(i)
-            important_attr = np.unique(important_attr)
-            for attr_id in important_attr:
-                f.write("\t" + str(attr_id))
-            f.write("\n")
-        # for node_id in range(len(map_nodes)):
-        #     f.write("v\t" + str(node_id) + "\t" + str(self.graph.nodes()[node_id]["label"]) + "\n")
-        for edge in pattern_edges:
-            f.write("e\t" + str(map_nodes[edge[0]]) + "\t" + str(map_nodes[edge[1]]) + "\t" + str(edge[2]) + "\n")
-    f.close()
+    for link_type in link_type_set:
+        suffix = suffix + "_" + str(link_type)
+        with open(path + args.dataset + ".explaination_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
+            f.write("#\t" + str(index) + "\n")
+            for node_oid, node_id in map_nodes.items():
+                f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[node_oid]["label"]))
+                important_attr = []
+                if node_oid in oid2newid_src.keys():
+                    node_oid_feat = src_features[oid2newid_src[node_oid]]
+                    for i in range(node_oid_feat.shape[0]):
+                        if node_oid_feat[i] == 1:
+                            important_attr.append(i)
+                if node_oid in oid2newid_dst.keys():
+                    node_oid_feat = dst_features[oid2newid_dst[node_oid]]
+                    for i in range(node_oid_feat.shape[0]):
+                        if node_oid_feat[i] == 1:
+                            important_attr.append(i)
+                important_attr = np.unique(important_attr)
+                for attr_id in important_attr:
+                    f.write("\t" + str(attr_id))
+                f.write("\n")
+            # for node_id in range(len(map_nodes)):
+            #     f.write("v\t" + str(node_id) + "\t" + str(self.graph.nodes()[node_id]["label"]) + "\n")
+            for edge in pattern_edges:
+                f.write("e\t" + str(map_nodes[edge[0]]) + "\t" + str(map_nodes[edge[1]]) + "\t" + str(edge[2]) + "\n")
+        f.close()
 
 
 def denoise_graph(adj, node_idx, feat=None, label=None, threshold=None, threshold_num=None, max_component=True):
@@ -603,7 +605,7 @@ def attribute2vec(attrs):
     return np.array(list)
 
 
-def read_graphfile(datadir, dataname, multi_label):
+def read_graphfile(datadir, dataname, args):
     """ Read data from https://ls11-www.cs.tu-dortmund.de/staff/morris/graphkerneldatasets
         graph index starts with 1 in file
 
@@ -684,7 +686,7 @@ def read_graphfile(datadir, dataname, multi_label):
             # node_attrs.append(attribute2vec(line[2:]))
             attr_list = []
             for attr in line[2:]:
-                attr = attr.split(" ")
+                attr = attr.split(" ")  # for k-dimension feature vectors (k > 1)
                 if len(attr) == 1:
                     attr_list.append(float(attr[0]))
                 else:
@@ -711,27 +713,23 @@ def read_graphfile(datadir, dataname, multi_label):
     G = nx.MultiDiGraph()
     G.add_nodes_from(node_ids)
     G.add_edges_from(adj_list)
-    # undirected graph
-    # G = nx.from_edgelist(adj_list)
-    # indexed from 1 here
 
-    # Special label for aromaticity experiment
-    # aromatic_edge = 2
-    # G.graph['aromatic'] = aromatic_edge in edge_label_list[i]
-
-    if not multi_label:
-        for u in G.nodes():
-            G.nodes[u]["label"] = node_labels[u]
-            G.nodes[u]["feat"] = node_attrs[u]
-    else:
-        for u in G.nodes():
-            if num_node_labels > 0:
-                node_label_one_hot = [0] * num_node_labels
-                node_label = node_labels[u]
-                node_label_one_hot[node_label] = 1
-                G.nodes[u]["label"] = node_label_one_hot
-            if len(node_attrs) > 0:
-                G.nodes[u]["feat"] = node_attrs[u]
+    # if not args.multi_label:
+    #     for u in G.nodes():
+    #         G.nodes[u]["label"] = node_labels[u]
+    #         G.nodes[u]["feat"] = node_attrs[u]
+    # else:
+    #     for u in G.nodes():
+    #         if num_node_labels > 0:
+    #             node_label_one_hot = [0] * num_node_labels
+    #             node_label = node_labels[u]
+    #             node_label_one_hot[node_label] = 1
+    #             G.nodes[u]["label"] = node_label_one_hot
+    #         if len(node_attrs) > 0:
+    #             G.nodes[u]["feat"] = node_attrs[u]
+    for u in G.nodes():
+        G.nodes[u]["label"] = node_labels[u]
+        G.nodes[u]["feat"] = node_attrs[u]
     if len(node_attrs) > 0:
         G.graph["feat_dim"] = node_attrs[0].shape[0]
 

@@ -78,6 +78,8 @@ def arg_parse():
                         help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
+    parser.add_argument('--multi_class', dest='multi_class',
+                        help='whether multi class classification for link prediction')
     parser.add_argument('--multi_label', dest='multi_label',
                         help='whether multi label classification for link prediction')
     parser.add_argument('--fraction', dest='fraction',
@@ -86,10 +88,12 @@ def arg_parse():
     parser.set_defaults(datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
-                        dataset='USAir',
+                        dataset='USAir',            # test-multi_class
                         directed_graph=True,
                         link_prediction=True,
-                        single_edge_label=True,
+                        # regardless of types of nodes, only care the number of edge types!
+                        single_edge_label=True,     # False
+                        multi_class=False,          # True
                         multi_label=False,
                         fraction=0.3,
                         opt='adam',   # opt_parser
