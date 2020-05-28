@@ -85,7 +85,9 @@ def arg_parse():
     parser.add_argument('--fraction', dest='fraction',
                         help='fraction of edges that used to form training and test data')
 
-    parser.set_defaults(datadir='data', # io_parser
+    parser.set_defaults(
+                        # mainly change the following arguments:
+                        datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
                         dataset='USAir',            # test-multi_class
@@ -95,18 +97,19 @@ def arg_parse():
                         single_edge_label=True,     # False
                         multi_class=False,          # True
                         multi_label=False,
-                        fraction=0.3,
+                        fraction=0.2,
+                        train_ratio=0.8,
+                        lr=0.001,
+                        num_epochs=1000,
+                        # no change is ok for the following arguments:
+                        test_ratio=0.1,
                         opt='adam',   # opt_parser
                         opt_scheduler='none',
                         max_nodes=100,
                         cuda='1',
                         feature_type='default',
-                        lr=0.001,
                         clip=2.0,
                         batch_size=20,
-                        num_epochs=1000,
-                        train_ratio=0.8,
-                        test_ratio=0.1,
                         num_workers=1,
                         input_dim=10,
                         hidden_dim=20,

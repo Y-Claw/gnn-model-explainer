@@ -125,73 +125,12 @@ def load_ckpt(args, isbest=False):
         raise Exception("File not found.")
     return ckpt
 
-def preprocess_cg(cg):
-    """Pre-process computation graph."""
-    if use_cuda:
-        preprocessed_cg_tensor = torch.from_numpy(cg).cuda()
-    else:
-        preprocessed_cg_tensor = torch.from_numpy(cg)
 
-    preprocessed_cg_tensor.unsqueeze_(0)
-    return Variable(preprocessed_cg_tensor, requires_grad=False)
-
-def load_model(path):
-    """Load a pytorch model."""
-    model = torch.load(path)
-    model.eval()
-    if use_cuda:
-        model.cuda()
-
-    for p in model.features.parameters():
-        p.requires_grad = False
-    for p in model.classifier.parameters():
-        p.requires_grad = False
-
-    return model
-
-
-def load_cg(path):
-    """Load a computation graph."""
-    cg = pickle.load(open(path))
-    return cg
-
-
-def save(mask_cg):
-    """Save a rendering of the computation graph mask."""
-    mask = mask_cg.cpu().data.numpy()[0]
-    mask = np.transpose(mask, (1, 2, 0))
-
-    mask = (mask - np.min(mask)) / np.max(mask)
-    mask = 1 - mask
-
-    cv2.imwrite("mask.png", np.uint8(255 * mask))
-
-def log_matrix(writer, mat, name, epoch, fig_size=(8, 6), dpi=200):
-    """Save an image of a matrix to disk.
-
-    Args:
-        - writer    :  A file writer.
-        - mat       :  The matrix to write.
-        - name      :  Name of the file to save.
-        - epoch     :  Epoch number.
-        - fig_size  :  Size to of the figure to save.
-        - dpi       :  Resolution.
-    """
-    plt.switch_backend("agg")
-    fig = plt.figure(figsize=fig_size, dpi=dpi)
-    mat = mat.cpu().detach().numpy()
-    if mat.ndim == 1:
-        mat = mat[:, np.newaxis]
-    plt.imshow(mat, cmap=plt.get_cmap("BuPu"))
-    cbar = plt.colorbar()
-    cbar.solids.set_edgecolor("face")
-
-    plt.tight_layout()
-    fig.canvas.draw()
-    writer.add_image(name, tensorboardX.utils.figure_to_image(fig), epoch)
-
-
-def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=None, feat_threshold=None, edge_num_threshold=None, args=None):
+def denoise_adj_feat(
+        graph, adj, node_idx, feat, neighbors,
+        edge_threshold=None, feat_threshold=None, edge_num_threshold=None,
+        args=None
+):
     """Cleaning a graph by thresholding its node values.
 
     Args:
@@ -205,10 +144,8 @@ def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=None,
 
     num_nodes = adj.shape[0]
 
-    if edge_threshold is None:
-        edge_threshold = 1e-6
-    if feat_threshold is None:
-        feat_threshold = 1e-6
+    # threshold definition-1
+    threshold = 0
     if edge_num_threshold is not None:
         # this is for symmetric graphs: edges are repeated twice in adj
         adj_threshold_num = edge_num_threshold * 2  # undirected graph
@@ -219,7 +156,13 @@ def denoise_adj_feat(graph, adj, node_idx, feat, neighbors, edge_threshold=None,
         if neigh_size == 0:
             return None
         threshold_num = min(neigh_size, adj_threshold_num)
-        edge_threshold = np.sort(adj[adj > 0])[-threshold_num]
+        threshold = np.sort(adj[adj > 0])[-threshold_num]   # the threshold_num - th largest value in adj
+    edge_threshold = edge_threshold if edge_threshold > threshold else threshold
+
+    # threshold definition-2: use average threshold
+    avg_threshold = sum(adj[adj > 0]) / adj[adj > 0].shape[0]
+    edge_threshold = threshold if threshold > avg_threshold else avg_threshold
+    # edge_threshold = edge_threshold if edge_threshold > 0.5 else 0.5
 
     reserved_edge_list = []
     reserved_node_list = []
@@ -282,9 +225,7 @@ def combine_src_dst_explanations(
     pattern_nodes = filter(lambda x: x != src_idx and x != dst_idx, pattern_nodes)
     pattern_nodes = [i for i in pattern_nodes]
     pattern_nodes = np.unique(pattern_nodes)
-    map_nodes = {}
-    map_nodes[src_idx] = 0
-    map_nodes[dst_idx] = 1
+    map_nodes = {src_idx: 0, dst_idx: 1}
     for i in range(pattern_nodes.shape[0]):
         map_nodes[pattern_nodes[i]] = i + 2
 
@@ -331,216 +272,6 @@ def combine_src_dst_explanations(
         f.close()
 
 
-def denoise_graph(adj, node_idx, feat=None, label=None, threshold=None, threshold_num=None, max_component=True):
-    """Cleaning a graph by thresholding its node values.
-
-    Args:
-        - adj               :  Adjacency matrix.
-        - node_idx          :  Index of node to highlight (TODO ?)
-        - feat              :  An array of node features.
-        - label             :  A list of node labels.
-        - threshold         :  The weight threshold.
-        - theshold_num      :  The maximum number of nodes to threshold.
-        - max_component     :  TODO
-    """
-    num_nodes = adj.shape[-1]
-    G = nx.Graph()
-    G.add_nodes_from(range(num_nodes))
-    G.nodes[node_idx]["self"] = 1
-    if feat is not None:
-        for node in G.nodes():
-            G.nodes[node]["feat"] = feat[node]
-    if label is not None:
-        for node in G.nodes():
-            G.nodes[node]["label"] = label[node]
-
-    if threshold_num is not None:
-        # this is for symmetric graphs: edges are repeated twice in adj
-        adj_threshold_num = threshold_num * 2
-        #adj += np.random.rand(adj.shape[0], adj.shape[1]) * 1e-4
-        neigh_size = len(adj[adj > 0])
-        threshold_num = min(neigh_size, adj_threshold_num)
-        threshold = np.sort(adj[adj > 0])[-threshold_num]
-
-    if threshold is not None:
-        weighted_edge_list = [
-            (i, j, adj[i, j])
-            for i in range(num_nodes)
-            for j in range(num_nodes)
-            if adj[i, j] >= threshold
-        ]
-    else:
-        weighted_edge_list = [
-            (i, j, adj[i, j])
-            for i in range(num_nodes)
-            for j in range(num_nodes)
-            if adj[i, j] > 1e-6
-        ]
-    G.add_weighted_edges_from(weighted_edge_list)
-    if max_component:
-        largest_cc = max(nx.connected_components(G), key=len)
-        G = G.subgraph(largest_cc).copy()
-    else:
-        # remove zero degree nodes
-        G.remove_nodes_from(list(nx.isolates(G)))
-    return G
-
-# TODO: unify log_graph and log_graph2
-def log_graph(
-    writer,
-    Gc,
-    name,
-    identify_self=True,
-    nodecolor="label",
-    epoch=0,
-    fig_size=(4, 3),
-    dpi=300,
-    label_node_feat=False,
-    edge_vmax=None,
-    args=None,
-):
-    """
-    Args:
-        nodecolor: the color of node, can be determined by 'label', or 'feat'. For feat, it needs to
-            be one-hot'
-    """
-    cmap = plt.get_cmap("Set1")
-    plt.switch_backend("agg")
-    fig = plt.figure(figsize=fig_size, dpi=dpi)
-
-    node_colors = []
-    # edge_colors = [min(max(w, 0.0), 1.0) for (u,v,w) in Gc.edges.data('weight', default=1)]
-    edge_colors = [w for (u, v, w) in Gc.edges.data("weight", default=1)]
-
-    # maximum value for node color
-    vmax = 8
-    for i in Gc.nodes():
-        if nodecolor == "feat" and "feat" in Gc.nodes[i]:
-            num_classes = Gc.nodes[i]["feat"].size()[0]
-            if num_classes >= 10:
-                cmap = plt.get_cmap("tab20")
-                vmax = 19
-            elif num_classes >= 8:
-                cmap = plt.get_cmap("tab10")
-                vmax = 9
-            break
-
-    feat_labels = {}
-    for i in Gc.nodes():
-        if identify_self and "self" in Gc.nodes[i]:
-            node_colors.append(0)
-        elif nodecolor == "label" and "label" in Gc.nodes[i]:
-            node_colors.append(Gc.nodes[i]["label"] + 1)
-        elif nodecolor == "feat" and "feat" in Gc.nodes[i]:
-            # print(Gc.nodes[i]['feat'])
-            feat = Gc.nodes[i]["feat"].detach().numpy()
-            # idx with pos val in 1D array
-            feat_class = 0
-            for j in range(len(feat)):
-                if feat[j] == 1:
-                    feat_class = j
-                    break
-            node_colors.append(feat_class)
-            feat_labels[i] = feat_class
-        else:
-            node_colors.append(1)
-    if not label_node_feat:
-        feat_labels = None
-
-    plt.switch_backend("agg")
-    fig = plt.figure(figsize=fig_size, dpi=dpi)
-
-    if Gc.number_of_nodes() == 0:
-        raise Exception("empty graph")
-    if Gc.number_of_edges() == 0:
-        raise Exception("empty edge")
-    # remove_nodes = []
-    # for u in Gc.nodes():
-    #    if Gc
-    pos_layout = nx.kamada_kawai_layout(Gc, weight=None)
-    # pos_layout = nx.spring_layout(Gc, weight=None)
-
-    weights = [d for (u, v, d) in Gc.edges(data="weight", default=1)]
-    if edge_vmax is None:
-        edge_vmax = statistics.median_high(
-            [d for (u, v, d) in Gc.edges(data="weight", default=1)]
-        )
-    min_color = min([d for (u, v, d) in Gc.edges(data="weight", default=1)])
-    # color range: gray to black
-    edge_vmin = 2 * min_color - edge_vmax
-    nx.draw(
-        Gc,
-        pos=pos_layout,
-        with_labels=False,
-        font_size=4,
-        labels=feat_labels,
-        node_color=node_colors,
-        vmin=0,
-        vmax=vmax,
-        cmap=cmap,
-        edge_color=edge_colors,
-        edge_cmap=plt.get_cmap("Greys"),
-        edge_vmin=edge_vmin,
-        edge_vmax=edge_vmax,
-        width=1.0,
-        node_size=50,
-        alpha=0.8,
-    )
-    fig.axes[0].xaxis.set_visible(False)
-    fig.canvas.draw()
-
-    if args is None:
-        save_path = os.path.join("log/", name + ".pdf")
-    else:
-        save_path = os.path.join(
-            "log", name + gen_explainer_prefix(args) + "_" + str(epoch) + ".pdf"
-        )
-        print("log/" + name + gen_explainer_prefix(args) + "_" + str(epoch) + ".pdf")
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    plt.savefig(save_path, format="pdf")
-
-    img = tensorboardX.utils.figure_to_image(fig)
-    writer.add_image(name, img, epoch)
-
-
-def plot_cmap(cmap, ncolor):
-    """ 
-    A convenient function to plot colors of a matplotlib cmap
-    Credit goes to http://gvallver.perso.univ-pau.fr/?p=712
- 
-    Args:
-        ncolor (int): number of color to show
-        cmap: a cmap object or a matplotlib color name
-    """
-
-    if isinstance(cmap, str):
-        name = cmap
-        try:
-            cm = plt.get_cmap(cmap)
-        except ValueError:
-            print("WARNINGS :", cmap, " is not a known colormap")
-            cm = plt.cm.gray
-    else:
-        cm = cmap
-        name = cm.name
-
-    with matplotlib.rc_context(matplotlib.rcParamsDefault):
-        fig = plt.figure(figsize=(12, 1), frameon=False)
-        ax = fig.add_subplot(111)
-        ax.pcolor(np.linspace(1, ncolor, ncolor).reshape(1, ncolor), cmap=cm)
-        ax.set_title(name)
-        xt = ax.set_xticks([])
-        yt = ax.set_yticks([])
-    return fig
-
-
-def plot_cmap_tb(writer, cmap, ncolor, name):
-    """Plot the color map used for plot."""
-    fig = plot_cmap(cmap, ncolor)
-    img = tensorboardX.utils.figure_to_image(fig)
-    writer.add_image(name, img, 0)
-
-
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     """Convert a scipy sparse matrix to a torch sparse tensor."""
     sparse_mx = sparse_mx.tocoo().astype(np.float32)
@@ -550,21 +281,6 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     values = torch.from_numpy(sparse_mx.data)
     shape = torch.Size(sparse_mx.shape)
     return torch.sparse.FloatTensor(indices, values, shape)
-
-
-def numpy_to_torch(img, requires_grad=True):
-    if len(img.shape) < 3:
-        output = np.float32([img])
-    else:
-        output = np.transpose(img, (2, 0, 1))
-
-    output = torch.from_numpy(output)
-    if use_cuda:
-        output = output.cuda()
-
-    output.unsqueeze_(0)
-    v = Variable(output, requires_grad=requires_grad)
-    return v
 
 
 def is_number_str(numStr):
@@ -589,20 +305,20 @@ def is_float_str(numStr):
 
 
 def attribute2vec(attrs):
-    list = []
+    tmp_list = []
     for i in range(len(attrs)):
         if attrs[i] == "" or attrs[i] == "-":
-            list.append(0)
+            tmp_list.append(0)
         else:
             # filtered_attr = re.sub("[-_()\\\\,`\'\[\]]", "", attrs[i])
             filtered_attr = attrs[i]
             if is_number_str(filtered_attr):
-                list.append(int(filtered_attr))
+                tmp_list.append(int(filtered_attr))
             elif is_float_str(filtered_attr):
-                list.append(float(filtered_attr))
+                tmp_list.append(float(filtered_attr))
             else:
-                list.append(len(filtered_attr) + random.random())
-    return np.array(list)
+                tmp_list.append(len(filtered_attr) + random.random())
+    return np.array(tmp_list)
 
 
 def read_graphfile(datadir, dataname, args):
@@ -749,108 +465,3 @@ def read_graphfile(datadir, dataname, args):
     # G = nx.relabel_nodes(G, mapping)
 
     return G, node_labels, num_node_labels, num_edge_labels
-
-
-def log_assignment(assign_tensor, writer, epoch, batch_idx):
-    plt.switch_backend("agg")
-    fig = plt.figure(figsize=(8, 6), dpi=300)
-
-    # has to be smaller than args.batch_size
-    for i in range(len(batch_idx)):
-        plt.subplot(2, 2, i + 1)
-        plt.imshow(
-            assign_tensor.cpu().data.numpy()[batch_idx[i]], cmap=plt.get_cmap("BuPu")
-        )
-        cbar = plt.colorbar()
-        cbar.solids.set_edgecolor("face")
-    plt.tight_layout()
-    fig.canvas.draw()
-
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    writer.add_image("assignment", data, epoch)
-
-# TODO: unify log_graph and log_graph2
-def log_graph2(adj, batch_num_nodes, writer, epoch, batch_idx, assign_tensor=None):
-    plt.switch_backend("agg")
-    fig = plt.figure(figsize=(8, 6), dpi=300)
-
-    for i in range(len(batch_idx)):
-        ax = plt.subplot(2, 2, i + 1)
-        num_nodes = batch_num_nodes[batch_idx[i]]
-        adj_matrix = adj[batch_idx[i], :num_nodes, :num_nodes].cpu().data.numpy()
-        G = nx.from_numpy_matrix(adj_matrix)
-        nx.draw(
-            G,
-            pos=nx.spring_layout(G),
-            with_labels=True,
-            node_color="#336699",
-            edge_color="grey",
-            width=0.5,
-            node_size=300,
-            alpha=0.7,
-        )
-        ax.xaxis.set_visible(False)
-
-    plt.tight_layout()
-    fig.canvas.draw()
-
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    writer.add_image("graphs", data, epoch)
-
-    # log a label-less version
-    # fig = plt.figure(figsize=(8,6), dpi=300)
-    # for i in range(len(batch_idx)):
-    #    ax = plt.subplot(2, 2, i+1)
-    #    num_nodes = batch_num_nodes[batch_idx[i]]
-    #    adj_matrix = adj[batch_idx[i], :num_nodes, :num_nodes].cpu().data.numpy()
-    #    G = nx.from_numpy_matrix(adj_matrix)
-    #    nx.draw(G, pos=nx.spring_layout(G), with_labels=False, node_color='#336699',
-    #            edge_color='grey', width=0.5, node_size=25,
-    #            alpha=0.8)
-
-    # plt.tight_layout()
-    # fig.canvas.draw()
-
-    # data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep='')
-    # data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    # writer.add_image('graphs_no_label', data, epoch)
-
-    # colored according to assignment
-    assignment = assign_tensor.cpu().data.numpy()
-    fig = plt.figure(figsize=(8, 6), dpi=300)
-
-    num_clusters = assignment.shape[2]
-    all_colors = np.array(range(num_clusters))
-
-    for i in range(len(batch_idx)):
-        ax = plt.subplot(2, 2, i + 1)
-        num_nodes = batch_num_nodes[batch_idx[i]]
-        adj_matrix = adj[batch_idx[i], :num_nodes, :num_nodes].cpu().data.numpy()
-
-        label = np.argmax(assignment[batch_idx[i]], axis=1).astype(int)
-        label = label[: batch_num_nodes[batch_idx[i]]]
-        node_colors = all_colors[label]
-
-        G = nx.from_numpy_matrix(adj_matrix)
-        nx.draw(
-            G,
-            pos=nx.spring_layout(G),
-            with_labels=False,
-            node_color=node_colors,
-            edge_color="grey",
-            width=0.4,
-            node_size=50,
-            cmap=plt.get_cmap("Set1"),
-            vmin=0,
-            vmax=num_clusters - 1,
-            alpha=0.8,
-        )
-
-    plt.tight_layout()
-    fig.canvas.draw()
-
-    data = np.fromstring(fig.canvas.tostring_rgb(), dtype=np.uint8, sep="")
-    data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-    writer.add_image("graphs_colored", data, epoch)

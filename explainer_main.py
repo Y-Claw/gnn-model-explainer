@@ -154,6 +154,7 @@ def arg_parse():
 
     # TODO: Check argument usage
     parser.set_defaults(
+        # mainly change the following arguments:
         logdir="log",
         ckptdir="ckpt",
         dataset="USAir",                # test-multi_class
@@ -163,13 +164,14 @@ def arg_parse():
         multi_class=False,              # True
         multi_label=False,
         n_hops=1,
-        opt="adam",  
+        lr=0.1,
+        num_epochs=1000,
+        # no change is ok for the following arguments:
+        opt="adam",
         opt_scheduler="none",
         cuda="0",
-        lr=0.1,
         clip=2.0,
         batch_size=20,
-        num_epochs=100,
         hidden_dim=20,
         output_dim=20,
         num_gc_layers=3,
@@ -218,8 +220,7 @@ def main():
 
     # build model
     print("Method: ", prog_args.method)
-    if prog_args.link_prediction == True:
-        # Explain Node prediction
+    if prog_args.link_prediction is True:
         model = models.GcnEncoderNode(
             input_dim=input_dim,
             hidden_dim=prog_args.hidden_dim,
@@ -255,9 +256,6 @@ def main():
     )
     # adj[u][v] = 1 means that, there's an edge from node v to node u. (directed graph)
 
-    # TODO: API should definitely be cleaner
-    # Let's define exactly which modes we support 
-    # We could even move each mode to a different method (even file)
     if prog_args.link_prediction is True:
         print("begin explaining a set of links one by one...")
         src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res = explainer.explain_a_set_of_links(
