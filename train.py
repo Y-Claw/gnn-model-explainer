@@ -34,6 +34,7 @@ import utils.parser_utils as parser_utils
 import utils.train_utils as train_utils
 import utils.featgen as featgen
 import utils.graph_utils as graph_utils
+import copy
 
 import models
 
@@ -189,6 +190,33 @@ def prepare_data(graph, num_edge_labels, args):
         return graph, np.array(train_data), np.array(train_labels), np.array(test_data), np.array(test_labels)
 
 
+def generate_predict_data(graph, num_edge_labels, args):
+    predict_data = []
+    num_nodes = graph.number_of_nodes()
+    if args.single_edge_label or args.multi_class:
+        for src in range(num_nodes):
+            for dst in range(num_nodes):
+                if not graph.has_edge(src, dst):
+                    predict_data.append((src, dst))
+    elif args.multi_label:
+        for src in range(num_nodes):
+            for dst in range(num_nodes):
+                predict_data.append((src, dst))
+                # if not graph.has_edge(src, dst):
+                #     for elabel in range(num_edge_labels):
+                #         predict_data.append((src, dst, elabel))
+                # else:
+                #     for elabel in range(num_edge_labels):
+                #         flag = 0
+                #         for i in range(len(graph[src][dst])):
+                #             if graph[src][dst][i]['label'] == elabel:
+                #                 flag = 1
+                #                 break
+                #         if flag == 0:
+                #             predict_data.append((src, dst, elabel))
+    return np.array(predict_data)
+
+
 #############################
 #
 # Training 
@@ -337,6 +365,63 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     }
     io_utils.save_checkpoint(model, optimizer, args, num_epochs=-1, cg_dict=cg_data)
 
+    return model
+
+
+def predict(original_graph, predict_data, model, args):
+    # predict in original_graph instead of graph that has deleted edges in training data
+    num_nodes = original_graph.number_of_nodes()
+    adj_original_graph = nx.to_numpy_array(original_graph)
+    adj_original_graph = adj_original_graph.transpose()
+
+    existing_node = list(original_graph.nodes)[-1]
+    feat_dim = original_graph.nodes[existing_node]["feat"].shape[0]
+    x = np.zeros((num_nodes, feat_dim), dtype=float)
+    for i, u in enumerate(original_graph.nodes()):
+        x[i, :] = original_graph.nodes[u]["feat"]
+
+    adj = np.expand_dims(adj_original_graph, axis=0)
+    x = np.expand_dims(x, axis=0)
+
+    adj = torch.tensor(adj, dtype=torch.float)
+    x = torch.tensor(x, requires_grad=True, dtype=torch.float)
+
+    model.eval()
+    ypred, _ = model(x, adj, predict_data)
+
+    # write predicted edges into file
+    predicted_links = []
+    ypred = torch.sigmoid(ypred).detach().numpy()[0]
+    print("predict threshold: " + str(args.predict_threshold))
+    # print(" < , < :")
+    # print(ypred[(ypred[:, 0] < args.predict_threshold) & (ypred[:, 1] < args.predict_threshold)].shape)
+    # print(" > , > :")
+    # print(ypred[(ypred[:, 0] > args.predict_threshold) & (ypred[:, 1] > args.predict_threshold)].shape)
+    # print(" > , ~ :")
+    # print(ypred[ypred[:, 0] > args.predict_threshold].shape)
+    # print(" ~ , > :")
+    # print(ypred[ypred[:, 1] > args.predict_threshold].shape)
+
+    if args.single_edge_label:
+        for row in range(ypred.shape[0]):
+            if ypred[row][1] > args.predict_threshold:
+                predicted_links.append((predict_data[row][0], predict_data[row][1], 0))  # '0' means edge label
+    elif args.multi_class:
+        for row in range(ypred.shape[0]):
+            if max(ypred[row]) > args.predict_threshold:
+                predicted_links.append((predict_data[row][0], predict_data[row][1], np.argmax(ypred[row])))
+    elif args.multi_label:
+        for row in range(ypred.shape[0]):
+            for elabel in range(ypred.shape[1]):
+                if ypred[row][elabel] > args.predict_threshold:
+                    if not original_graph.has_edge(predict_data[row][0], predict_data[row][1], elabel):
+                        predicted_links.append((predict_data[row][0], predict_data[row][1], elabel))
+    predicted_links = np.array(predicted_links)
+    path = "data/" + args.dataset + "/" + args.dataset + ".link"
+    np.savetxt(path, predicted_links, delimiter="\t", fmt="%d")
+
+    return predicted_links
+
 
 #############################
 #
@@ -459,6 +544,8 @@ def link_prediction_task(args, writer=None):
     )
     input_dim = graph.graph["feat_dim"]
 
+    original_graph = copy.deepcopy(graph)
+
     graph, train_data, train_labels, test_data, test_labels = prepare_data(graph, num_edge_labels, args)
 
     model = None
@@ -485,7 +572,11 @@ def link_prediction_task(args, writer=None):
             args=args,
         )
 
-    train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
+    predict_data = generate_predict_data(original_graph, num_edge_labels, args)
+
+    model = train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
+
+    predict(original_graph, predict_data, model, args)
 
 
 def main():
@@ -494,15 +585,12 @@ def main():
     path = os.path.join(prog_args.logdir, io_utils.gen_prefix(prog_args))
     writer = SummaryWriter(path)
 
-    # io_utils.read_train_test_file(prog_args.datadir, prog_args.bmname)
-
     if prog_args.gpu:
         os.environ["CUDA_VISIBLE_DEVICES"] = prog_args.cuda
         print("CUDA", prog_args.cuda)
     else:
         print("Using CPU")
 
-    # use --bmname=[dataset_name] for Reddit-Binary, Mutagenicity
     if prog_args.link_prediction is True:
         link_prediction_task(prog_args, writer=writer)
 

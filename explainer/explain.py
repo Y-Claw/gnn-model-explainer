@@ -234,49 +234,49 @@ class Explainer:
                     ypred,
                 )
 
-            if self.writer is not None:
-                    self.writer.add_scalar("mask/src_density", src_mask_density, epoch)
-                    self.writer.add_scalar("mask/dst_density", dst_mask_density, epoch)
-                    self.writer.add_scalar(
-                        "optimization/lr",
-                        explainer.optimizer.param_groups[0]["lr"],
-                        epoch,
-                    )
-                    # if epoch % 25 == 0:
-                    #     explainer.log_mask(epoch)
-                    #     explainer.log_masked_adj(
-                    #         node_idx_new, epoch, label=single_subgraph_label
-                    #     )
-                    #     explainer.log_adj_grad(
-                    #         node_idx_new, pred_label, epoch, label=single_subgraph_label
-                    #     )
-
-                    # if epoch == 0:
-                    #     if self.model.att:
-                    #         # explain node
-                    #         print("adj att size: ", adj_atts.size())
-                    #         adj_att = torch.sum(adj_atts[0], dim=2)
-                    #         # adj_att = adj_att[neighbors][:, neighbors]
-                    #         node_adj_att = adj_att * adj.float().cuda()
-                    #         io_utils.log_matrix(
-                    #             self.writer, node_adj_att[0], "att/matrix", epoch
-                    #         )
-                    #         node_adj_att = node_adj_att[0].cpu().detach().numpy()
-                    #         G = io_utils.denoise_graph(
-                    #             node_adj_att,
-                    #             node_idx_new,
-                    #             threshold=3.8,  # threshold_num=20,
-                    #             max_component=True,
-                    #         )
-                    #         io_utils.log_graph(
-                    #             self.writer,
-                    #             G,
-                    #             name="att/graph",
-                    #             identify_self=not self.graph_mode,
-                    #             nodecolor="label",
-                    #             edge_vmax=None,
-                    #             args=self.args,
-                    #         )
+            # if self.writer is not None:
+            #         self.writer.add_scalar("mask/src_density", src_mask_density, epoch)
+            #         self.writer.add_scalar("mask/dst_density", dst_mask_density, epoch)
+            #         self.writer.add_scalar(
+            #             "optimization/lr",
+            #             explainer.optimizer.param_groups[0]["lr"],
+            #             epoch,
+            #         )
+            #         # if epoch % 25 == 0:
+            #         #     explainer.log_mask(epoch)
+            #         #     explainer.log_masked_adj(
+            #         #         node_idx_new, epoch, label=single_subgraph_label
+            #         #     )
+            #         #     explainer.log_adj_grad(
+            #         #         node_idx_new, pred_label, epoch, label=single_subgraph_label
+            #         #     )
+            #
+            #         # if epoch == 0:
+            #         #     if self.model.att:
+            #         #         # explain node
+            #         #         print("adj att size: ", adj_atts.size())
+            #         #         adj_att = torch.sum(adj_atts[0], dim=2)
+            #         #         # adj_att = adj_att[neighbors][:, neighbors]
+            #         #         node_adj_att = adj_att * adj.float().cuda()
+            #         #         io_utils.log_matrix(
+            #         #             self.writer, node_adj_att[0], "att/matrix", epoch
+            #         #         )
+            #         #         node_adj_att = node_adj_att[0].cpu().detach().numpy()
+            #         #         G = io_utils.denoise_graph(
+            #         #             node_adj_att,
+            #         #             node_idx_new,
+            #         #             threshold=3.8,  # threshold_num=20,
+            #         #             max_component=True,
+            #         #         )
+            #         #         io_utils.log_graph(
+            #         #             self.writer,
+            #         #             G,
+            #         #             name="att/graph",
+            #         #             identify_self=not self.graph_mode,
+            #         #             nodecolor="label",
+            #         #             edge_vmax=None,
+            #         #             args=self.args,
+            #         #         )
             if model != "exp":
                 break
 
@@ -302,12 +302,12 @@ class Explainer:
         #
         fname = 'masked_adj_' + io_utils.gen_explainer_prefix(self.args) + (
                 'src_idx_'+str(src_idx)+'dst_idx_'+str(dst_idx)+'.npy')
-        with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
-            np.save(outfile, np.asarray(src_masked_adj.copy()))
-            np.save(outfile, np.asarray(dst_masked_adj.copy()))
-            np.save(outfile, np.array(src_sub_feat.copy()))
-            np.save(outfile, np.array(dst_sub_feat.copy()))
-            print("Saved adjacency matrix to ", fname)
+        # with open(os.path.join(self.args.logdir, fname), 'wb') as outfile:
+        #     np.save(outfile, np.asarray(src_masked_adj.copy()))
+        #     np.save(outfile, np.asarray(dst_masked_adj.copy()))
+        #     np.save(outfile, np.array(src_sub_feat.copy()))
+        #     np.save(outfile, np.array(dst_sub_feat.copy()))
+        #     print("Saved adjacency matrix to ", fname)
 
         src_results = {
             "src_sub_feat": src_sub_feat,
