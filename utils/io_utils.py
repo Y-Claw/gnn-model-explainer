@@ -246,7 +246,7 @@ def combine_src_dst_explanations(
 
     for link_type in link_type_set:
         suffix = suffix + "_" + str(link_type)
-        with open(path + args.dataset + ".explaination_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
+        with open(path + args.dataset + ".explanation_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
             f.write("#\t" + str(index) + "\n")
             for node_oid, node_id in map_nodes.items():
                 f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[node_oid]["label"]))
