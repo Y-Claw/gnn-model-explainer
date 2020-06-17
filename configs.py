@@ -84,6 +84,8 @@ def arg_parse():
                         help='whether multi label classification for link prediction')
     parser.add_argument('--fraction', dest='fraction',
                         help='fraction of edges that used to form training and test data')
+    parser.add_argument('--predict_batch_size', dest='predict_batch_size',
+                        help='the batch size for predicting')
     parser.add_argument('--predict_threshold', dest='predict_threshold',
                         help='threshold for deciding whether a link exsits when predicting')
 
@@ -95,6 +97,7 @@ def arg_parse():
                         dataset='USAir',            # test-multi_class
                         directed_graph=True,
                         link_prediction=True,
+                        predict_batch_size=10000000,
                         predict_threshold=0.8,
                         # regardless of types of nodes, only care the number of edge types!
                         single_edge_label=True,     # False

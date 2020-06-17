@@ -275,7 +275,11 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
         elapsed = time.time() - begin_time
 
+        start_time = time.time()
         result_train, result_test = evaluate_link(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels, args)
+        end_time = time.time()
+        if epoch % 10 == 0:
+            print("evalate time: ", (end_time - start_time))
 
         if writer is not None:
             writer.add_scalar("loss/avg_loss", loss.item(), epoch)
@@ -370,6 +374,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
 def predict(original_graph, predict_data, model, args):
     # predict in original_graph instead of graph that has deleted edges in training data
+    start_time = time.time()
     num_nodes = original_graph.number_of_nodes()
     adj_original_graph = nx.to_numpy_array(original_graph)
     adj_original_graph = adj_original_graph.transpose()
@@ -385,40 +390,64 @@ def predict(original_graph, predict_data, model, args):
 
     adj = torch.tensor(adj, dtype=torch.float)
     x = torch.tensor(x, requires_grad=True, dtype=torch.float)
+    end_time = time.time()
+    print("prepare inputs for model for predicting time: ", (end_time - start_time))
 
     model.eval()
-    ypred, _ = model(x, adj, predict_data)
 
-    # write predicted edges into file
-    predicted_links = []
-    ypred = torch.sigmoid(ypred).detach().numpy()[0]
     print("predict threshold: " + str(args.predict_threshold))
-    # print(" < , < :")
-    # print(ypred[(ypred[:, 0] < args.predict_threshold) & (ypred[:, 1] < args.predict_threshold)].shape)
-    # print(" > , > :")
-    # print(ypred[(ypred[:, 0] > args.predict_threshold) & (ypred[:, 1] > args.predict_threshold)].shape)
-    # print(" > , ~ :")
-    # print(ypred[ypred[:, 0] > args.predict_threshold].shape)
-    # print(" ~ , > :")
-    # print(ypred[ypred[:, 1] > args.predict_threshold].shape)
 
-    if args.single_edge_label:
-        for row in range(ypred.shape[0]):
-            if ypred[row][1] > args.predict_threshold:
-                predicted_links.append((predict_data[row][0], predict_data[row][1], 0))  # '0' means edge label
-    elif args.multi_class:
-        for row in range(ypred.shape[0]):
-            if max(ypred[row]) > args.predict_threshold:
-                predicted_links.append((predict_data[row][0], predict_data[row][1], np.argmax(ypred[row])))
-    elif args.multi_label:
-        for row in range(ypred.shape[0]):
-            for elabel in range(ypred.shape[1]):
-                if ypred[row][elabel] > args.predict_threshold:
-                    if not original_graph.has_edge(predict_data[row][0], predict_data[row][1], elabel):
-                        predicted_links.append((predict_data[row][0], predict_data[row][1], elabel))
-    predicted_links = np.array(predicted_links)
+    start = 0
+    end = start + args.predict_batch_size
+    predicted_links = []
+    while start < predict_data.shape[0]:
+        ypred, _ = model(x, adj, predict_data[start:end, :])
+        if args.single_edge_label:
+            rows_idx = np.where(torch.sigmoid(ypred)[:, :, 1:2] > args.predict_threshold)[1]
+            pre_etype = np.array([0] * rows_idx.shape[0])         # '0' means edge label
+            predicted_links.append(np.column_stack((predict_data[start:end, :][rows_idx], pre_etype)))
+        elif args.multi_class:
+            rows_idx = np.where(torch.max(torch.sigmoid(ypred), 2)[0] > args.predict_threshold)[1]
+            pre_etype = torch.argmax(torch.sigmoid(ypred), 2)[0].detach().numpy()[rows_idx]
+            predicted_links.append(np.column_stack((predict_data[start:end, :][rows_idx], pre_etype)))
+        elif args.multi_label:
+            for row in range(ypred.shape[1]):
+                for elabel in range(ypred.shape[2]):
+                    if ypred[0][row][elabel] > args.predict_threshold:
+                        src_id = predict_data[start:end, :][row][0]
+                        dst_id = predict_data[start:end, :][row][1]
+                        if not original_graph.has_edge(src_id, dst_id, elabel):
+                            predicted_links.append((src_id, dst_id, elabel))
+        start = end
+        end = start + args.predict_batch_size
+
+    predicted_link_results = predicted_links[0]
+    for i in range(1, len(predicted_links)):
+        predicted_link_results = np.concatenate((predicted_link_results, predicted_links[i]), axis=0)
     path = "data/" + args.dataset + "/" + args.dataset + ".link"
-    np.savetxt(path, predicted_links, delimiter="\t", fmt="%d")
+    np.savetxt(path, predicted_link_results, delimiter="\t", fmt="%d")
+
+    # predicted_links = []
+    # if args.single_edge_label:
+    #     ypred = torch.sigmoid(ypred)[0].detach().numpy()
+    #     for row in range(ypred.shape[0]):
+    #         if ypred[row][1] > args.predict_threshold:
+    #             predicted_links.append((predict_data[row][0], predict_data[row][1], 0))  # '0' means edge label
+    # elif args.multi_class:
+    #     ypred = torch.sigmoid(ypred)[0].detach().numpy()
+    #     for row in range(ypred.shape[0]):
+    #         if max(ypred[row]) > args.predict_threshold:
+    #             predicted_links.append((predict_data[row][0], predict_data[row][1], np.argmax(ypred[row])))
+    # elif args.multi_label:
+    #     ypred = ypred[0].detach().numpy()
+    #     for row in range(ypred.shape[0]):
+    #         for elabel in range(ypred.shape[1]):
+    #             if ypred[row][elabel] > args.predict_threshold:
+    #                 if not original_graph.has_edge(predict_data[row][0], predict_data[row][1], elabel):
+    #                     predicted_links.append((predict_data[row][0], predict_data[row][1], elabel))
+    # predicted_links = np.array(predicted_links)
+    # path = "data/" + args.dataset + "/" + args.dataset + ".link"
+    # np.savetxt(path, predicted_links, delimiter="\t", fmt="%d")
 
     return predicted_links
 
@@ -539,15 +568,22 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
 
 
 def link_prediction_task(args, writer=None):
+    start_time = time.time()
     graph, node_labels, num_node_labels, num_edge_labels = io_utils.read_graphfile(
         args.datadir, args.dataset, args
     )
+    end_time = time.time()
+    print("load graph time: ", (end_time - start_time))
     input_dim = graph.graph["feat_dim"]
 
     original_graph = copy.deepcopy(graph)
 
+    start_time = time.time()
     graph, train_data, train_labels, test_data, test_labels = prepare_data(graph, num_edge_labels, args)
+    end_time = time.time()
+    print("prepare training and testing data time: ", (end_time - start_time))
 
+    start_time = time.time()
     model = None
     if args.single_edge_label:
         model = models.GcnEncoderNode(
@@ -571,19 +607,31 @@ def link_prediction_task(args, writer=None):
             dropout=args.dropout,
             args=args,
         )
+    end_time = time.time()
+    print("construct model time: ", (end_time - start_time))
 
+    start_time = time.time()
     predict_data = generate_predict_data(original_graph, num_edge_labels, args)
+    end_time = time.time()
+    print("generate predict data time: ", (end_time - start_time))
 
+    start_time = time.time()
     model = train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
+    end_time = time.time()
+    print("whole training and testing time: ", (end_time - start_time))
 
+    start_time = time.time()
     predict(original_graph, predict_data, model, args)
+    end_time = time.time()
+    print("whole predicting time: ", (end_time - start_time))
 
 
 def main():
+    start_time = time.time()
     prog_args = configs.arg_parse()
 
     path = os.path.join(prog_args.logdir, io_utils.gen_prefix(prog_args))
-    writer = SummaryWriter(path)
+    # writer = SummaryWriter(path)
 
     if prog_args.gpu:
         os.environ["CUDA_VISIBLE_DEVICES"] = prog_args.cuda
@@ -592,9 +640,13 @@ def main():
         print("Using CPU")
 
     if prog_args.link_prediction is True:
-        link_prediction_task(prog_args, writer=writer)
+        link_prediction_task(prog_args, writer=None)
+        # link_prediction_task(prog_args, writer=writer)
 
-    writer.close()
+    # writer.close()
+
+    end_time = time.time()
+    print("Total running time: ", (end_time - start_time))
 
 
 if __name__ == "__main__":
