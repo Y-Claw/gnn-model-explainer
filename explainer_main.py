@@ -17,7 +17,7 @@ import models
 import utils.io_utils as io_utils
 import utils.parser_utils as parser_utils
 from explainer import explain
-
+import sys
 
 
 def arg_parse():
@@ -151,10 +151,17 @@ def arg_parse():
                         help='whether multi label classification for link prediction')
     parser.add_argument('--n_hops', dest='n_hops',
                         help='n hops neighboors')
+    parser.add_argument('--edge_threshold', dest='edge_threshold',
+                        help='the edge threshold for filtering during explanation')
+    parser.add_argument('--feat_threshold', dest='feat_threshold',
+                        help='the feature threshold for filtering during explanation')
+    parser.add_argument('--edge_num_threshold_src_or_dst', dest='edge_num_threshold_src_or_dst',
+                        help='the max number of edges of the explanation results, for src or dst nodes')
 
     # TODO: Check argument usage
     parser.set_defaults(
         # mainly change the following arguments:
+        gpu=False,
         logdir="log",
         ckptdir="ckpt",
         dataset="USAir",                # test-multi_class
@@ -166,6 +173,10 @@ def arg_parse():
         n_hops=1,
         lr=0.1,
         num_epochs=1000,
+        edge_threshold=0.5,
+        feat_threshold=0.25,
+        edge_num_threshold_src_or_dst=3,
+
         # no change is ok for the following arguments:
         opt="adam",
         opt_scheduler="none",

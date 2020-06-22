@@ -91,6 +91,7 @@ def arg_parse():
 
     parser.set_defaults(
                         # mainly change the following arguments:
+                        gpu=False,
                         datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
@@ -107,6 +108,7 @@ def arg_parse():
                         train_ratio=0.8,
                         lr=0.001,
                         num_epochs=1000,
+
                         # no change is ok for the following arguments:
                         test_ratio=0.1,
                         opt='adam',   # opt_parser

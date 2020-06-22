@@ -145,13 +145,13 @@ class Explainer:
 
             src_denoise_result = io_utils.denoise_adj_feat(
                 self.graph, src_masked_adj, src_idx_new, src_masked_feat, src_neighbors,
-                edge_threshold=0.05, feat_threshold=0.05, edge_num_threshold=10, args=args
+                edge_threshold=args.edge_threshold, feat_threshold=args.feat_threshold, edge_num_threshold=args.edge_num_threshold_src_or_dst, args=args
             )
             if src_denoise_result is None:
                 continue
             dst_denoise_result = io_utils.denoise_adj_feat(
                 self.graph, dst_masked_adj, dst_idx_new, dst_masked_feat, dst_neighbors,
-                edge_threshold=0.05, feat_threshold=0.05, edge_num_threshold=10, args=args
+                edge_threshold=args.edge_threshold, feat_threshold=args.feat_threshold, edge_num_threshold=args.edge_num_threshold_src_or_dst, args=args
             )
             if dst_denoise_result is None:
                 continue
@@ -495,11 +495,7 @@ class ExplainModule(nn.Module):
                     dst_x = dst_x * dst_feat_mask
 
         ypred, src_adj_att, dst_adj_att = self.model(src_x, self.src_masked_adj, [self.src_idx_new, self.dst_idx_new], dst_x, self.dst_masked_adj)
-        # if self.graph_mode:
-        #     res = nn.Softmax(dim=0)(ypred[0])
-        # else:
-        #     node_pred = ypred[self.graph_idx, node_idx, :]
-        #     res = nn.Softmax(dim=0)(node_pred)
+
         return ypred, src_adj_att, dst_adj_att
 
     def loss(self, pred, pred_label, epoch):

@@ -35,6 +35,7 @@ import utils.train_utils as train_utils
 import utils.featgen as featgen
 import utils.graph_utils as graph_utils
 import copy
+import sys
 
 import models
 
@@ -214,6 +215,7 @@ def generate_predict_data(graph, num_edge_labels, args):
                 #                 break
                 #         if flag == 0:
                 #             predict_data.append((src, dst, elabel))
+    print("generate ", len(predict_data), "predict data")
     return np.array(predict_data)
 
 
@@ -262,12 +264,17 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
         model.zero_grad()
 
-        ypred_train, adj_att = model(x, adj, train_data)
-        loss = model.loss(ypred_train, train_labels)
+        if args.gpu:
+            ypred_train, adj_att = model(x.cuda(), adj.cuda(), train_data.cuda())
+        else:
+            ypred_train, adj_att = model(x, adj, train_data)
+
+        if args.gpu:
+            loss = model.loss(ypred_train, train_labels.cuda())
+        else:
+            loss = model.loss(ypred_train, train_labels)
 
         loss.backward()
-        # for param in model.parameters():
-        #     print(param.grad)
 
         nn.utils.clip_grad_norm_(model.parameters(), args.clip)
 
@@ -276,7 +283,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
         elapsed = time.time() - begin_time
 
         start_time = time.time()
-        result_train, result_test = evaluate_link(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels, args)
+        result_train, result_test = evaluate_link(model, adj, x, test_data, test_labels, ypred_train.cpu(), train_labels.cpu(), args)
         end_time = time.time()
         if epoch % 10 == 0:
             print("evalate time: ", (end_time - start_time))
@@ -353,8 +360,12 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
     # computation graph
     model.eval()
-    ypred_train, _ = model(x, adj, train_data)
-    ypred_test, _ = model(x, adj, test_data)
+    if args.gpu:
+        ypred_train, _ = model(x.cuda(), adj.cuda(), train_data.cuda())
+        ypred_test, _ = model(x.cuda(), adj.cuda(), test_data.cuda())
+    else:
+        ypred_train, _ = model(x, adj, train_data)
+        ypred_test, _ = model(x, adj, test_data)
     cg_data = {
         "graph": G,
         "adj": adj.numpy(),
@@ -401,19 +412,22 @@ def predict(original_graph, predict_data, model, args):
     end = start + args.predict_batch_size
     predicted_links = []
     while start < predict_data.shape[0]:
-        ypred, _ = model(x, adj, predict_data[start:end, :])
+        if args.gpu:
+            ypred, _ = model(x.cuda(), adj.cuda(), predict_data[start:end, :].cuda())
+        else:
+            ypred, _ = model(x, adj, predict_data[start:end, :])
         if args.single_edge_label:
-            rows_idx = np.where(torch.sigmoid(ypred)[:, :, 1:2] > args.predict_threshold)[1]
+            rows_idx = np.where(torch.sigmoid(ypred.cpu())[:, :, 1:2] > args.predict_threshold)[1]
             pre_etype = np.array([0] * rows_idx.shape[0])         # '0' means edge label
             predicted_links.append(np.column_stack((predict_data[start:end, :][rows_idx], pre_etype)))
         elif args.multi_class:
-            rows_idx = np.where(torch.max(torch.sigmoid(ypred), 2)[0] > args.predict_threshold)[1]
-            pre_etype = torch.argmax(torch.sigmoid(ypred), 2)[0].detach().numpy()[rows_idx]
+            rows_idx = np.where(torch.max(torch.sigmoid(ypred.cpu()), 2)[0] > args.predict_threshold)[1]
+            pre_etype = torch.argmax(torch.sigmoid(ypred.cpu()), 2)[0].detach().numpy()[rows_idx]
             predicted_links.append(np.column_stack((predict_data[start:end, :][rows_idx], pre_etype)))
         elif args.multi_label:
-            for row in range(ypred.shape[1]):
-                for elabel in range(ypred.shape[2]):
-                    if ypred[0][row][elabel] > args.predict_threshold:
+            for row in range(ypred.cpu().shape[1]):
+                for elabel in range(ypred.cpu().shape[2]):
+                    if ypred.cpu()[0][row][elabel] > args.predict_threshold:
                         src_id = predict_data[start:end, :][row][0]
                         dst_id = predict_data[start:end, :][row][1]
                         if not original_graph.has_edge(src_id, dst_id, elabel):
@@ -460,13 +474,16 @@ def predict(original_graph, predict_data, model, args):
 def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labels, args):
     test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
-    ypred_test, adj_att = model(x, adj, test_data)
+    if args.gpu:
+        ypred_test, adj_att = model(x.cuda(), adj.cuda(), test_data.cuda())
+    else:
+        ypred_test, adj_att = model(x, adj, test_data)
 
     if args.single_edge_label or args.multi_class:
         _, ypred_train_labels = torch.max(ypred_train, 2)
         ypred_train_labels = ypred_train_labels.numpy()
 
-        _, ypred_test_labels = torch.max(ypred_test, 2)
+        _, ypred_test_labels = torch.max(ypred_test.cpu(), 2)
         ypred_test_labels = ypred_test_labels.numpy()
 
         pred_train = np.ravel(ypred_train_labels)
@@ -494,7 +511,7 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
         # ypred_train[ypred_train >= 0.5] = 1
         # ypred_train = ypred_train.astype(int)
 
-        ypred_test = ypred_test.detach().numpy()[0]
+        ypred_test = ypred_test.cpu().detach().numpy()[0]
         # ypred_test[ypred_test < 0.5] = 0
         # ypred_test[ypred_test >= 0.5] = 1
         # ypred_test = ypred_test.astype(int)
@@ -607,6 +624,8 @@ def link_prediction_task(args, writer=None):
             dropout=args.dropout,
             args=args,
         )
+    if args.gpu:
+        model = model.cuda()
     end_time = time.time()
     print("construct model time: ", (end_time - start_time))
 
