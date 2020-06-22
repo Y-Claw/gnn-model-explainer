@@ -95,15 +95,15 @@ def arg_parse():
                         datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
-                        dataset='USAir',            # test-multi_class
+                        dataset='USAir',            # test-multi_class   test-multi_label
                         directed_graph=True,
                         link_prediction=True,
                         predict_batch_size=10000000,
-                        predict_threshold=0.8,
+                        predict_threshold=0.82,
                         # regardless of types of nodes, only care the number of edge types!
-                        single_edge_label=True,     # False
-                        multi_class=False,          # True
-                        multi_label=False,
+                        single_edge_label=True,     # False     False
+                        multi_class=False,          # True      False
+                        multi_label=False,          # False     True
                         fraction=0.2,
                         train_ratio=0.8,
                         lr=0.001,

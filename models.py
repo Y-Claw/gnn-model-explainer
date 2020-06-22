@@ -58,7 +58,6 @@ class GraphConv(nn.Module):
     def forward(self, x, adj):
         if self.dropout > 0.001:
             x = self.dropout_layer(x)
-        # deg = torch.sum(adj, -1, keepdim=True)
         if self.att:
             x_att = torch.matmul(x, self.att_weight)
             # import pdb
@@ -67,16 +66,15 @@ class GraphConv(nn.Module):
             # att = self.softmax(att)
             adj = adj * att
 
-        y = torch.matmul(adj, x)
-        y = torch.matmul(y, self.weight)
+        y = torch.mm(adj, x)
+        y = torch.mm(y, self.weight)
         if self.add_self:
             self_emb = torch.matmul(x, self.self_weight)
             y += self_emb
         if self.bias is not None:
             y = y + self.bias
         if self.normalize_embedding:
-            y = F.normalize(y, p=2, dim=2)
-            # print(y[0][0])
+            y = F.normalize(y, p=2, dim=1)
         return y, adj
 
 
@@ -257,14 +255,15 @@ class GcnEncoderGraph(nn.Module):
         x_all.append(x)
         adj_att_all.append(adj_att)
         # x_tensor: [batch_size x num_nodes x embedding]
-        x_tensor = torch.cat(x_all, dim=2)
+        x_tensor = torch.cat(x_all, dim=1)
         if embedding_mask is not None:
             x_tensor = x_tensor * embedding_mask
         # self.embedding_tensor = x_tensor
 
         # adj_att_tensor: [batch_size x num_nodes x num_nodes x num_gc_layers]
-        adj_att_tensor = torch.stack(adj_att_all, dim=3)
-        return x_tensor, adj_att_tensor
+        # adj_att_tensor = torch.stack(adj_att_all, dim=3)
+        # return x_tensor, adj_att_tensor
+        return x_tensor, None
 
     def forward(self, x, adj, batch_num_nodes=None, **kwargs):
         # mask
@@ -378,27 +377,14 @@ class GcnEncoderNode(GcnEncoderGraph):
         self.embedding_tensor, adj_att = self.gcn_forward(
             x, adj, self.conv_first, self.conv_block, self.conv_last, embedding_mask
         )
-        # pred = self.pred_model(self.embedding_tensor)
-        # return pred, adj_att
 
         if x2 is None and adj2 is None:                                         # for training the model
             src_idx = train_edges[:, 0]
             dst_idx = train_edges[:, 1]
-            src_embed_tensor = self.embedding_tensor[:, src_idx]
-            dst_embed_tensor = self.embedding_tensor[:, dst_idx]
+            src_embed_tensor = self.embedding_tensor[src_idx, :]
+            dst_embed_tensor = self.embedding_tensor[dst_idx, :]
             # link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
             link_embed_tensor = src_embed_tensor * dst_embed_tensor
-            # link_embed_tensor = src_embed_tensor @ torch.transpose(dst_embed_tensor, 1, 2)  # not good
-
-            # node_embeddings = self.embedding_tensor.data.numpy()[0]
-            # src_idx = train_edges[:, 0]
-            # dst_idx = train_edges[:, 1]
-            # src_embeddings = node_embeddings[src_idx]
-            # dst_embeddings = node_embeddings[dst_idx]
-            # link_embeddings = (src_embeddings + dst_embeddings) / 2
-            # # link_embeddings = src_embeddings * dst_embeddings
-            # link_embeddings = np.expand_dims(link_embeddings, axis=0)
-            # link_embed_tensor = torch.tensor(link_embeddings, requires_grad=True, dtype=torch.float)
 
             pred = self.pred_model(link_embed_tensor)
             if self.multi_label:
@@ -408,8 +394,8 @@ class GcnEncoderNode(GcnEncoderGraph):
             self.embedding_tensor2, adj_att2 = self.gcn_forward(
                 x2, adj2, self.conv_first, self.conv_block, self.conv_last, embedding_mask
             )
-            src_embed_tensor = self.embedding_tensor[:, train_edges[0]]
-            dst_embed_tensor = self.embedding_tensor2[:, train_edges[1]]
+            src_embed_tensor = self.embedding_tensor[train_edges[0], :]
+            dst_embed_tensor = self.embedding_tensor2[train_edges[1], :]
             # link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
             link_embed_tensor = src_embed_tensor * dst_embed_tensor
             pred = self.pred_model(link_embed_tensor)
@@ -419,7 +405,7 @@ class GcnEncoderNode(GcnEncoderGraph):
 
     def loss(self, pred, label):
         if self.single_edge_label or self.multi_class:
-            pred = torch.transpose(pred, 1, 2)
+            # pred = torch.transpose(pred, 1, 2)
             return self.celoss(pred, label)
         elif self.multi_label:
             return self.bceloss(pred, label.float())

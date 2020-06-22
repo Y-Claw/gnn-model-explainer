@@ -229,13 +229,8 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
 
     num_nodes = G.number_of_nodes()
 
-    # adj_origin = nx.adjacency_matrix(G)
-    adj_origin = nx.to_numpy_array(G)
-    # adj_origin = [[0] * num_nodes] * num_nodes
-    # adj_origin = np.array(adj_origin)
-    # edges = list(G.edges())
-    # for edge in edges:
-    #     adj_origin[edge[0]][edge[1]] += 1
+    adj_origin = nx.adjacency_matrix(G)
+
     adj = adj_origin.transpose()
     # Transpose to collect information from in-edges during 'forward' in GraphConv class when graph is directed.
     # For undirected graph, transpose or not transpose do not change anything.
@@ -246,11 +241,8 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     for i, u in enumerate(G.nodes()):
         x[i, :] = G.nodes[u]["feat"]
 
-    adj = np.expand_dims(adj, axis=0)
-    x = np.expand_dims(x, axis=0)
-    train_labels = np.expand_dims(train_labels, axis=0)
-
-    adj = torch.tensor(adj, dtype=torch.float)
+    adj = adj.tocoo()
+    adj = torch.sparse.FloatTensor(torch.LongTensor([adj.row.tolist(), adj.col.tolist()]), torch.FloatTensor(adj.data.astype(np.int32)), torch.Size([adj.shape[0], adj.shape[1]]))
     x = torch.tensor(x, requires_grad=True, dtype=torch.float)
     train_labels = torch.tensor(train_labels, dtype=torch.long)
 
@@ -343,14 +335,10 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
                 result_train["recall"],
                 "; test_recall: ",
                 result_test["recall"],
-                # "; train_F1: ",
-                # result_train["F1"],
-                # "; test_F1: ",
-                # result_test["F1"],
-                "; train_AUC: ",
-                result_train["AUC"],
-                "; test_AUC: ",
-                result_test["AUC"],
+                # "; train_AUC: ",
+                # result_train["AUC"],
+                # "; test_AUC: ",
+                # result_test["AUC"],
                 "; epoch time: ",
                 "{0:0.2f}".format(elapsed),
             )
@@ -368,7 +356,9 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
         ypred_test, _ = model(x, adj, test_data)
     cg_data = {
         "graph": G,
-        "adj": adj.numpy(),
+        "adj_indices": adj._indices(),
+        "adj_values": adj._values(),
+        "adj_size": adj.size(),
         "feat": x.detach().numpy(),
         "node_labels": np.expand_dims(node_labels, axis=0),
         "label_train": train_labels.numpy(),
@@ -387,7 +377,7 @@ def predict(original_graph, predict_data, model, args):
     # predict in original_graph instead of graph that has deleted edges in training data
     start_time = time.time()
     num_nodes = original_graph.number_of_nodes()
-    adj_original_graph = nx.to_numpy_array(original_graph)
+    adj_original_graph = nx.adjacency_matrix(original_graph)
     adj_original_graph = adj_original_graph.transpose()
 
     existing_node = list(original_graph.nodes)[-1]
@@ -396,10 +386,10 @@ def predict(original_graph, predict_data, model, args):
     for i, u in enumerate(original_graph.nodes()):
         x[i, :] = original_graph.nodes[u]["feat"]
 
-    adj = np.expand_dims(adj_original_graph, axis=0)
-    x = np.expand_dims(x, axis=0)
-
-    adj = torch.tensor(adj, dtype=torch.float)
+    adj = adj_original_graph.tocoo()
+    adj = torch.sparse.FloatTensor(torch.LongTensor([adj.row.tolist(), adj.col.tolist()]),
+                                   torch.FloatTensor(adj.data.astype(np.int32)),
+                                   torch.Size([adj.shape[0], adj.shape[1]]))
     x = torch.tensor(x, requires_grad=True, dtype=torch.float)
     end_time = time.time()
     print("prepare inputs for model for predicting time: ", (end_time - start_time))
@@ -417,17 +407,17 @@ def predict(original_graph, predict_data, model, args):
         else:
             ypred, _ = model(x, adj, predict_data[start:end, :])
         if args.single_edge_label:
-            rows_idx = np.where(torch.sigmoid(ypred.cpu())[:, :, 1:2] > args.predict_threshold)[1]
+            rows_idx = np.where(torch.sigmoid(ypred.cpu())[:, 1:2] > args.predict_threshold)[0]
             pre_etype = np.array([0] * rows_idx.shape[0])         # '0' means edge label
             predicted_links.append(np.column_stack((predict_data[start:end, :][rows_idx], pre_etype)))
         elif args.multi_class:
-            rows_idx = np.where(torch.max(torch.sigmoid(ypred.cpu()), 2)[0] > args.predict_threshold)[1]
-            pre_etype = torch.argmax(torch.sigmoid(ypred.cpu()), 2)[0].detach().numpy()[rows_idx]
+            rows_idx = np.where(torch.max(torch.sigmoid(ypred.cpu()), 1)[0] > args.predict_threshold)
+            pre_etype = torch.argmax(torch.sigmoid(ypred.cpu()), 1).detach().numpy()[rows_idx]
             predicted_links.append(np.column_stack((predict_data[start:end, :][rows_idx], pre_etype)))
         elif args.multi_label:
             for row in range(ypred.cpu().shape[1]):
-                for elabel in range(ypred.cpu().shape[2]):
-                    if ypred.cpu()[0][row][elabel] > args.predict_threshold:
+                for elabel in range(ypred.cpu().shape[1]):
+                    if ypred.cpu()[row][elabel] > args.predict_threshold:
                         src_id = predict_data[start:end, :][row][0]
                         dst_id = predict_data[start:end, :][row][1]
                         if not original_graph.has_edge(src_id, dst_id, elabel):
@@ -435,11 +425,14 @@ def predict(original_graph, predict_data, model, args):
         start = end
         end = start + args.predict_batch_size
 
-    predicted_link_results = predicted_links[0]
-    for i in range(1, len(predicted_links)):
-        predicted_link_results = np.concatenate((predicted_link_results, predicted_links[i]), axis=0)
+    # predicted_link_results = predicted_links[0]
+    # for i in range(1, len(predicted_links)):
+    #     predicted_link_results = np.concatenate((predicted_link_results, predicted_links[i]), axis=0)
     path = "data/" + args.dataset + "/" + args.dataset + ".link"
-    np.savetxt(path, predicted_link_results, delimiter="\t", fmt="%d")
+    if args.single_edge_label or args.multi_class:
+        np.savetxt(path, predicted_links[0], delimiter="\t", fmt="%d")
+    elif args.multi_label:
+        np.savetxt(path, predicted_links, delimiter="\t", fmt="%d")
 
     # predicted_links = []
     # if args.single_edge_label:
@@ -472,7 +465,6 @@ def predict(original_graph, predict_data, model, args):
 #
 #############################
 def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labels, args):
-    test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
     if args.gpu:
         ypred_test, adj_att = model(x.cuda(), adj.cuda(), test_data.cuda())
@@ -480,10 +472,10 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
         ypred_test, adj_att = model(x, adj, test_data)
 
     if args.single_edge_label or args.multi_class:
-        _, ypred_train_labels = torch.max(ypred_train, 2)
+        _, ypred_train_labels = torch.max(ypred_train, 1)
         ypred_train_labels = ypred_train_labels.numpy()
 
-        _, ypred_test_labels = torch.max(ypred_test.cpu(), 2)
+        _, ypred_test_labels = torch.max(ypred_test.cpu(), 1)
         ypred_test_labels = ypred_test_labels.numpy()
 
         pred_train = np.ravel(ypred_train_labels)
@@ -506,18 +498,18 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
         return result_train, result_test
 
     elif args.multi_label:
-        ypred_train = ypred_train.detach().numpy()[0]
+        ypred_train = ypred_train.detach().numpy()
         # ypred_train[ypred_train < 0.5] = 0
         # ypred_train[ypred_train >= 0.5] = 1
         # ypred_train = ypred_train.astype(int)
 
-        ypred_test = ypred_test.cpu().detach().numpy()[0]
+        ypred_test = ypred_test.cpu().detach().numpy()
         # ypred_test[ypred_test < 0.5] = 0
         # ypred_test[ypred_test >= 0.5] = 1
         # ypred_test = ypred_test.astype(int)
 
-        train_labels = train_labels.numpy()[0]
-        test_labels = test_labels.numpy()[0]
+        train_labels = train_labels.numpy()
+        test_labels = test_labels.numpy()
 
         num_classes = ypred_train.shape[1]
         # For each class
@@ -566,20 +558,20 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
 
         # auc_train = metrics.roc_curve(train_labels.ravel(), ypred_train.ravel())
         # auc_test = metrics.roc_curve(test_labels.ravel(), ypred_test.ravel())
-        auc_train = metrics.roc_auc_score(train_labels, ypred_train)
-        auc_test = metrics.roc_auc_score(test_labels, ypred_test)
+        # auc_train = metrics.roc_auc_score(train_labels, ypred_train)
+        # auc_test = metrics.roc_auc_score(test_labels, ypred_test)
 
         result_train = {
             "prec": prec_train,
             "recall": rec_train,
             "F1": F1_train,
-            "AUC": auc_train,
+            # "AUC": auc_train,
         }
         result_test = {
             "prec": prec_test,
             "recall": rec_test,
             "F1": F1_test,
-            "AUC": auc_test,
+            # "AUC": auc_test,
         }
         return result_train, result_test
 
