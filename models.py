@@ -384,23 +384,9 @@ class GcnEncoderNode(GcnEncoderGraph):
         if x2 is None and adj2 is None:                                         # for training the model
             src_idx = train_edges[:, 0]
             dst_idx = train_edges[:, 1]
-            src_embed_tensor = self.embedding_tensor[:, src_idx]
-            dst_embed_tensor = self.embedding_tensor[:, dst_idx]
-            # link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
-            link_embed_tensor = src_embed_tensor * dst_embed_tensor
-            # link_embed_tensor = src_embed_tensor @ torch.transpose(dst_embed_tensor, 1, 2)  # not good
-
-            # node_embeddings = self.embedding_tensor.data.numpy()[0]
-            # src_idx = train_edges[:, 0]
-            # dst_idx = train_edges[:, 1]
-            # src_embeddings = node_embeddings[src_idx]
-            # dst_embeddings = node_embeddings[dst_idx]
-            # link_embeddings = (src_embeddings + dst_embeddings) / 2
-            # # link_embeddings = src_embeddings * dst_embeddings
-            # link_embeddings = np.expand_dims(link_embeddings, axis=0)
-            # link_embed_tensor = torch.tensor(link_embeddings, requires_grad=True, dtype=torch.float)
-
-            pred = self.pred_model(link_embed_tensor)
+            pred = self.pred_model(
+                self.embedding_tensor[:, src_idx] * self.embedding_tensor[:, dst_idx]
+            )
             if self.multi_label:
                 pred = torch.sigmoid(pred)
             return pred, adj_att
@@ -410,7 +396,6 @@ class GcnEncoderNode(GcnEncoderGraph):
             )
             src_embed_tensor = self.embedding_tensor[:, train_edges[0]]
             dst_embed_tensor = self.embedding_tensor2[:, train_edges[1]]
-            # link_embed_tensor = (src_embed_tensor + dst_embed_tensor) / 2
             link_embed_tensor = src_embed_tensor * dst_embed_tensor
             pred = self.pred_model(link_embed_tensor)
             if self.multi_label:

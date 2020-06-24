@@ -253,6 +253,8 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     adj = torch.tensor(adj, dtype=torch.float)
     x = torch.tensor(x, requires_grad=True, dtype=torch.float)
     train_labels = torch.tensor(train_labels, dtype=torch.long)
+    train_data = torch.tensor(train_data, dtype=torch.long)
+    test_data = torch.tensor(test_data, dtype=torch.long)
 
     scheduler, optimizer = train_utils.build_optimizer(
         args, model.parameters(), weight_decay=args.weight_decay
@@ -413,7 +415,8 @@ def predict(original_graph, predict_data, model, args):
     predicted_links = []
     while start < predict_data.shape[0]:
         if args.gpu:
-            ypred, _ = model(x.cuda(), adj.cuda(), predict_data[start:end, :].cuda())
+            # ypred, _ = model(x.cuda(), adj.cuda(), predict_data[start:end, :].cuda())
+            ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data[start:end, :], dtype=torch.long).cuda())
         else:
             ypred, _ = model(x, adj, predict_data[start:end, :])
         if args.single_edge_label:
