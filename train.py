@@ -202,19 +202,23 @@ def generate_predict_data(graph, num_edge_labels, args):
     elif args.multi_label:
         for src in range(num_nodes):
             for dst in range(num_nodes):
-                predict_data.append((src, dst))
-                # if not graph.has_edge(src, dst):
-                #     for elabel in range(num_edge_labels):
-                #         predict_data.append((src, dst, elabel))
-                # else:
-                #     for elabel in range(num_edge_labels):
-                #         flag = 0
-                #         for i in range(len(graph[src][dst])):
-                #             if graph[src][dst][i]['label'] == elabel:
-                #                 flag = 1
-                #                 break
-                #         if flag == 0:
-                #             predict_data.append((src, dst, elabel))
+                # predict_data.append((src, dst))
+                if not graph.has_edge(src, dst):
+                    for elabel in range(num_edge_labels):
+                        predict_data.append((src, dst))
+                else:
+                    for elabel in range(num_edge_labels):
+                        if not graph.has_edge(src, dst, elabel):
+                            predict_data.append((src, dst))
+                            break
+                        # flag = 0
+                        # for i in range(len(graph[src][dst])):
+                        #     if graph[src][dst][i]['label'] == elabel:
+                        #         flag = 1
+                        #         break
+                        # if flag == 0:
+                        #     predict_data.append((src, dst))
+                        #     break
     print("generate ", len(predict_data), "predict data")
     return np.array(predict_data)
 
@@ -469,6 +473,110 @@ def predict(original_graph, predict_data, model, args):
     return predicted_links
 
 
+def predict_batch(original_graph, num_edge_labels, model, args):
+
+    def check_predict(predict_data, ypred, args):
+        predicted_links = []
+        if args.single_edge_label:
+            rows_idx = np.where(torch.sigmoid(ypred.cpu())[:, :, 1:2] > args.predict_threshold)[1]
+            pre_etype = np.array([0] * rows_idx.shape[0])  # '0' means edge label
+            predicted_links.append(np.column_stack((predict_data[rows_idx], pre_etype)))
+        elif args.multi_class:
+            rows_idx = np.where(torch.max(torch.sigmoid(ypred.cpu()), 2)[0] > args.predict_threshold)[1]
+            pre_etype = torch.argmax(torch.sigmoid(ypred.cpu()), 2)[0].detach().numpy()[rows_idx]
+            predicted_links.append(np.column_stack((predict_data[rows_idx], pre_etype)))
+        elif args.multi_label:
+            for row in range(ypred.cpu().shape[1]):
+                for elabel in range(ypred.cpu().shape[2]):
+                    if ypred.cpu()[0][row][elabel] > args.predict_threshold:
+                        src_id = predict_data[row][0]
+                        dst_id = predict_data[row][1]
+                        if not original_graph.has_edge(src_id, dst_id, elabel):
+                            predicted_links.append((src_id, dst_id, elabel))
+        return predicted_links
+
+    start_time = time.time()
+    num_nodes = original_graph.number_of_nodes()
+    adj_original_graph = nx.to_numpy_array(original_graph)
+    adj_original_graph = adj_original_graph.transpose()
+
+    existing_node = list(original_graph.nodes)[-1]
+    feat_dim = original_graph.nodes[existing_node]["feat"].shape[0]
+    x = np.zeros((num_nodes, feat_dim), dtype=float)
+    for i, u in enumerate(original_graph.nodes()):
+        x[i, :] = original_graph.nodes[u]["feat"]
+
+    adj = np.expand_dims(adj_original_graph, axis=0)
+    x = np.expand_dims(x, axis=0)
+
+    adj = torch.tensor(adj, dtype=torch.float)
+    x = torch.tensor(x, requires_grad=True, dtype=torch.float)
+    end_time = time.time()
+    print("prepare inputs for model for predicting time: ", (end_time - start_time))
+
+    model.eval()
+    print("predict threshold: " + str(args.predict_threshold))
+
+    # generate data of a batch size, then make prediction
+    num_predict_data = 0
+    predict_data = []
+    predicted_links = []
+    if args.single_edge_label or args.multi_class:
+        for src in range(num_nodes):
+            for dst in range(num_nodes):
+                if not original_graph.has_edge(src, dst):
+                    predict_data.append((src, dst))
+
+            if len(predict_data) >= args.predict_batch_size:
+                num_predict_data = num_predict_data + len(predict_data)
+                predict_data = np.array(predict_data)
+                if args.gpu:
+                    ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
+                else:
+                    ypred, _ = model(x, adj, predict_data)
+                predicted_links += check_predict(predict_data, ypred, args)
+                predict_data = []
+
+    elif args.multi_label:
+        for src in range(num_nodes):
+            for dst in range(num_nodes):
+                # predict_data.append((src, dst))
+                if not original_graph.has_edge(src, dst):
+                    for elabel in range(num_edge_labels):
+                        predict_data.append((src, dst))
+                else:
+                    for elabel in range(num_edge_labels):
+                        if not original_graph.has_edge(src, dst, elabel):
+                            predict_data.append((src, dst))
+                            break
+
+            if len(predict_data) >= args.predict_batch_size:
+                num_predict_data = num_predict_data + len(predict_data)
+                predict_data = np.array(predict_data)
+                if args.gpu:
+                    ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
+                else:
+                    ypred, _ = model(x, adj, predict_data)
+                predicted_links += check_predict(predict_data, ypred, args)
+                predict_data = []
+
+    if len(predict_data) > 0:
+        num_predict_data = num_predict_data + len(predict_data)
+        predict_data = np.array(predict_data)
+        if args.gpu:
+            ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
+        else:
+            ypred, _ = model(x, adj, predict_data)
+        predicted_links += check_predict(predict_data, ypred, args)
+
+    print("generate ", num_predict_data, "predict data")
+    predicted_link_results = predicted_links[0]
+    for i in range(1, len(predicted_links)):
+        predicted_link_results = np.concatenate((predicted_link_results, predicted_links[i]), axis=0)
+    path = "data/" + args.dataset + "/" + args.dataset + ".link"
+    np.savetxt(path, predicted_link_results, delimiter="\t", fmt="%d")
+
+
 #############################
 #
 # Evaluate Trained Model
@@ -633,17 +741,24 @@ def link_prediction_task(args, writer=None):
     print("construct model time: ", (end_time - start_time))
 
     start_time = time.time()
-    predict_data = generate_predict_data(original_graph, num_edge_labels, args)
-    end_time = time.time()
-    print("generate predict data time: ", (end_time - start_time))
-
-    start_time = time.time()
     model = train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
     end_time = time.time()
     print("whole training and testing time: ", (end_time - start_time))
 
+    # method-1: generate all predicted data, then make prediction in a batch way
+    # start_time = time.time()
+    # predict_data = generate_predict_data(original_graph, num_edge_labels, args)
+    # end_time = time.time()
+    # print("generate predict data time: ", (end_time - start_time))
+
+    # start_time = time.time()
+    # predict(original_graph, predict_data, model, args)
+    # end_time = time.time()
+    # print("whole predicting time: ", (end_time - start_time))
+
+    # method-2: generate data of a batch size, then make prediction
     start_time = time.time()
-    predict(original_graph, predict_data, model, args)
+    predict_batch(original_graph, num_edge_labels, model, args)
     end_time = time.time()
     print("whole predicting time: ", (end_time - start_time))
 
