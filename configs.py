@@ -74,8 +74,6 @@ def arg_parse():
 
     parser.add_argument('--link_prediction', dest='link_prediction',
                         help='whether do link prediction task')
-    parser.add_argument('--directed_graph', dest='directed_graph',
-                        help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
     parser.add_argument('--multi_class', dest='multi_class',
@@ -95,14 +93,13 @@ def arg_parse():
                         datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
-                        dataset='USAir',            # test-multi_class
-                        directed_graph=True,
+                        dataset='USAir',
                         link_prediction=True,
                         predict_batch_size=5000000,
                         predict_threshold=0.8,
                         # regardless of types of nodes, only care the number of edge types!
-                        single_edge_label=True,     # False
-                        multi_class=False,          # True
+                        single_edge_label=True,
+                        multi_class=False,
                         multi_label=False,
                         fraction=0.2,
                         train_ratio=0.8,

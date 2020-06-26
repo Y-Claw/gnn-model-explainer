@@ -164,11 +164,11 @@ def arg_parse():
         gpu=False,
         logdir="log",
         ckptdir="ckpt",
-        dataset="USAir",                # test-multi_class
+        dataset="USAir",
         directed_graph=True,
         link_prediction=True,
-        single_edge_label=True,         # False
-        multi_class=False,              # True
+        single_edge_label=True,
+        multi_class=False,
         multi_label=False,
         n_hops=1,
         lr=0.1,
@@ -176,6 +176,7 @@ def arg_parse():
         edge_threshold=0.5,
         feat_threshold=0.25,
         edge_num_threshold_src_or_dst=3,
+        writer=False,
 
         # no change is ok for the following arguments:
         opt="adam",

@@ -16,7 +16,6 @@ from matplotlib.figure import Figure
 import networkx as nx
 import numpy as np
 import pandas as pd
-import seaborn as sns
 import tensorboardX.utils
 
 import torch
@@ -514,9 +513,15 @@ class ExplainModule(nn.Module):
             # logit = pred[gt_label_node]
             # pred_loss = -torch.log(logit)
             if self.args.single_edge_label or self.args.multi_class:
-                pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
+                if self.args.gpu:
+                    pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()).cuda())
+                else:
+                    pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
             elif self.args.multi_label:
-                pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())
+                if self.args.gpu:
+                    pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float().cuda())
+                else:
+                    pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())
         # size
         src_mask = self.src_mask
         dst_mask = self.dst_mask
