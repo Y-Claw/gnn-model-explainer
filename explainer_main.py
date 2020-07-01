@@ -170,11 +170,11 @@ def arg_parse():
         single_edge_label=True,
         multi_class=False,
         multi_label=False,
-        n_hops=1,
+        n_hops=2,
         lr=0.1,
         num_epochs=1000,
         edge_threshold=0.5,
-        feat_threshold=0.25,
+        feat_threshold=0.5,
         edge_num_threshold_src_or_dst=3,
         writer=False,
 

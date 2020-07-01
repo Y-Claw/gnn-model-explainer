@@ -141,11 +141,13 @@ def denoise_adj_feat(
         - threshold         :  The weight threshold.
         - max_component     :  TODO
     """
+    if len(adj[adj > edge_threshold]) == 0:
+        return None
 
     num_nodes = adj.shape[0]
 
     # threshold definition-1
-    threshold = 0
+    threshold = threshold_num = 0
     if edge_num_threshold is not None:
         # this is for symmetric graphs: edges are repeated twice in adj
         adj_threshold_num = edge_num_threshold * 2  # undirected graph
@@ -157,16 +159,19 @@ def denoise_adj_feat(
             return None
         threshold_num = min(neigh_size, adj_threshold_num)
         threshold = np.sort(adj[adj > 0])[-threshold_num]   # the threshold_num - th largest value in adj
-    edge_threshold = edge_threshold if edge_threshold > threshold else threshold
+    if edge_threshold < threshold:
+        edge_threshold = threshold
 
     # threshold definition-2: use average threshold
     avg_threshold = sum(adj[adj > 0]) / adj[adj > 0].shape[0]
-    edge_threshold = threshold if threshold > avg_threshold else avg_threshold
-    # edge_threshold = edge_threshold if edge_threshold > 0.5 else 0.5
+    if edge_threshold < avg_threshold:
+        edge_threshold = avg_threshold
 
     reserved_edge_list = []
     reserved_node_list = []
     for i in range(num_nodes):
+        if len(reserved_edge_list) >= threshold_num:
+            break
         for j in range(num_nodes):
             if adj[i, j] < edge_threshold:
                 continue
@@ -179,8 +184,9 @@ def denoise_adj_feat(
             else:
                 for idx in reversed(range(len(graph[src_idx][dst_idx]))):
                     reserved_edge_list.append(graph[src_idx][dst_idx][idx]['label'])
-    if len(reserved_node_list) == 0:
-        return None
+            if len(reserved_edge_list) >= threshold_num:
+                break
+
     reserved_nodes = np.unique(reserved_node_list)
     reserved_feat = feat[reserved_nodes]
 
@@ -189,7 +195,6 @@ def denoise_adj_feat(
         return None
     node_idx_new = np.where(reserved_nodes == neighbors[node_idx])[0][0]
 
-    feat_threshold = 0.5
     reserved_feat = torch.sigmoid(torch.tensor(reserved_feat)).detach().numpy()
     reserved_feat[reserved_feat >= feat_threshold] = 1
     reserved_feat[reserved_feat < feat_threshold] = 0

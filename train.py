@@ -271,9 +271,9 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
         model.zero_grad()
 
         if args.gpu:
-            ypred_train, adj_att = model(x.cuda(), adj.cuda(), train_data.cuda())
+            ypred_train = model(x.cuda(), adj.cuda(), train_data.cuda())
         else:
-            ypred_train, adj_att = model(x, adj, train_data)
+            ypred_train = model(x, adj, train_data)
 
         if args.gpu:
             loss = model.loss(ypred_train, train_labels.cuda())
@@ -367,11 +367,11 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     # computation graph
     model.eval()
     if args.gpu:
-        ypred_train, _ = model(x.cuda(), adj.cuda(), train_data.cuda())
-        ypred_test, _ = model(x.cuda(), adj.cuda(), test_data.cuda())
+        ypred_train = model(x.cuda(), adj.cuda(), train_data.cuda())
+        ypred_test = model(x.cuda(), adj.cuda(), test_data.cuda())
     else:
-        ypred_train, _ = model(x, adj, train_data)
-        ypred_test, _ = model(x, adj, test_data)
+        ypred_train = model(x, adj, train_data)
+        ypred_test = model(x, adj, test_data)
     cg_data = {
         "graph": G,
         "adj": adj.numpy(),
@@ -419,10 +419,10 @@ def predict(original_graph, predict_data, model, args):
     predicted_links = []
     while start < predict_data.shape[0]:
         if args.gpu:
-            # ypred, _ = model(x.cuda(), adj.cuda(), predict_data[start:end, :].cuda())
-            ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data[start:end, :], dtype=torch.long).cuda())
+            # ypred = model(x.cuda(), adj.cuda(), predict_data[start:end, :].cuda())
+            ypred = model(x.cuda(), adj.cuda(), torch.tensor(predict_data[start:end, :], dtype=torch.long).cuda())
         else:
-            ypred, _ = model(x, adj, predict_data[start:end, :])
+            ypred = model(x, adj, predict_data[start:end, :])
         if args.single_edge_label:
             rows_idx = np.where(torch.sigmoid(ypred.cpu())[:, :, 1:2] > args.predict_threshold)[1]
             pre_etype = np.array([0] * rows_idx.shape[0])         # '0' means edge label
@@ -531,9 +531,9 @@ def predict_batch(original_graph, num_edge_labels, model, args):
                 num_predict_data = num_predict_data + len(predict_data)
                 predict_data = np.array(predict_data)
                 if args.gpu:
-                    ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
+                    ypred = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
                 else:
-                    ypred, _ = model(x, adj, predict_data)
+                    ypred = model(x, adj, predict_data)
                 predicted_links += check_predict(predict_data, ypred, args)
                 predict_data = []
 
@@ -554,9 +554,9 @@ def predict_batch(original_graph, num_edge_labels, model, args):
                 num_predict_data = num_predict_data + len(predict_data)
                 predict_data = np.array(predict_data)
                 if args.gpu:
-                    ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
+                    ypred = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
                 else:
-                    ypred, _ = model(x, adj, predict_data)
+                    ypred = model(x, adj, predict_data)
                 predicted_links += check_predict(predict_data, ypred, args)
                 predict_data = []
 
@@ -564,9 +564,9 @@ def predict_batch(original_graph, num_edge_labels, model, args):
         num_predict_data = num_predict_data + len(predict_data)
         predict_data = np.array(predict_data)
         if args.gpu:
-            ypred, _ = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
+            ypred = model(x.cuda(), adj.cuda(), torch.tensor(predict_data, dtype=torch.long).cuda())
         else:
-            ypred, _ = model(x, adj, predict_data)
+            ypred = model(x, adj, predict_data)
         predicted_links += check_predict(predict_data, ypred, args)
 
     print("generate ", num_predict_data, "predict data")
@@ -586,9 +586,9 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
     test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
     if args.gpu:
-        ypred_test, adj_att = model(x.cuda(), adj.cuda(), test_data.cuda())
+        ypred_test = model(x.cuda(), adj.cuda(), test_data.cuda())
     else:
-        ypred_test, adj_att = model(x, adj, test_data)
+        ypred_test = model(x, adj, test_data)
 
     if args.single_edge_label or args.multi_class:
         _, ypred_train_labels = torch.max(ypred_train, 2)

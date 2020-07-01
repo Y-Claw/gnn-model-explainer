@@ -76,8 +76,8 @@ class GraphConv(nn.Module):
             y = y + self.bias
         if self.normalize_embedding:
             y = F.normalize(y, p=2, dim=2)
-            # print(y[0][0])
-        return y, adj
+        # return y, adj
+        return y
 
 
 class GcnEncoderGraph(nn.Module):
@@ -237,34 +237,35 @@ class GcnEncoderGraph(nn.Module):
             The embedding dim is self.pred_input_dim
         """
 
-        x, adj_att = conv_first(x, adj)
+        # x, adj_att = conv_first(x, adj)
+        x = conv_first(x, adj)
         x = self.act(x)
         if self.bn:
             x = self.apply_bn(x)
         x_all = [x]
-        adj_att_all = [adj_att]
-        # out_all = []
-        # out, _ = torch.max(x, dim=1)
-        # out_all.append(out)
+        # adj_att_all = [adj_att]
         for i in range(len(conv_block)):
-            x, _ = conv_block[i](x, adj)
+            # x, _ = conv_block[i](x, adj)
+            x = conv_block[i](x, adj)
             x = self.act(x)
             if self.bn:
                 x = self.apply_bn(x)
             x_all.append(x)
-            adj_att_all.append(adj_att)
-        x, adj_att = conv_last(x, adj)
+            # adj_att_all.append(adj_att)
+        # x, adj_att = conv_last(x, adj)
+        x = conv_last(x, adj)
         x_all.append(x)
-        adj_att_all.append(adj_att)
+        # adj_att_all.append(adj_att)
+
         # x_tensor: [batch_size x num_nodes x embedding]
         x_tensor = torch.cat(x_all, dim=2)
         if embedding_mask is not None:
             x_tensor = x_tensor * embedding_mask
-        # self.embedding_tensor = x_tensor
 
         # adj_att_tensor: [batch_size x num_nodes x num_nodes x num_gc_layers]
-        adj_att_tensor = torch.stack(adj_att_all, dim=3)
-        return x_tensor, adj_att_tensor
+        # adj_att_tensor = torch.stack(adj_att_all, dim=3)
+        # return x_tensor, adj_att_tensor
+        return x_tensor
 
     def forward(self, x, adj, batch_num_nodes=None, **kwargs):
         # mask
@@ -374,12 +375,9 @@ class GcnEncoderNode(GcnEncoderGraph):
         else:
             embedding_mask = None
 
-        self.adj_atts = []
-        self.embedding_tensor, adj_att = self.gcn_forward(
+        self.embedding_tensor = self.gcn_forward(
             x, adj, self.conv_first, self.conv_block, self.conv_last, embedding_mask
         )
-        # pred = self.pred_model(self.embedding_tensor)
-        # return pred, adj_att
 
         if x2 is None and adj2 is None:                                         # for training the model
             src_idx = train_edges[:, 0]
@@ -389,18 +387,17 @@ class GcnEncoderNode(GcnEncoderGraph):
             )
             if self.multi_label:
                 pred = torch.sigmoid(pred)
-            return pred, adj_att
+            return pred
         else:                                                                      # for explaining a pair of nodes
-            self.embedding_tensor2, adj_att2 = self.gcn_forward(
+            self.dst_embedding_tensor = self.gcn_forward(
                 x2, adj2, self.conv_first, self.conv_block, self.conv_last, embedding_mask
             )
-            src_embed_tensor = self.embedding_tensor[:, train_edges[0]]
-            dst_embed_tensor = self.embedding_tensor2[:, train_edges[1]]
-            link_embed_tensor = src_embed_tensor * dst_embed_tensor
-            pred = self.pred_model(link_embed_tensor)
+            pred = self.pred_model(
+                self.embedding_tensor[:, train_edges[0]] * self.dst_embedding_tensor[:, train_edges[1]]
+            )
             if self.multi_label:
                 pred = torch.sigmoid(pred)
-            return pred, adj_att, adj_att2
+            return pred
 
     def loss(self, pred, label):
         if self.single_edge_label or self.multi_class:
