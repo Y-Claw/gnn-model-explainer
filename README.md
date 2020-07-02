@@ -1,7 +1,7 @@
 # Instrution
 This branch is for link prediction. 
 The 'adj' in codes is in the form of dense matrix rather than sparse matrix. 
-For explainer, it first denoises each adj and X for src_node and dst_node, then merge them.  
+For explainer, it first combine the explanation results for src_node and dst_node, then denoise it.
 
 
 # gnn-explainer

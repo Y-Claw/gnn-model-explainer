@@ -155,8 +155,8 @@ def arg_parse():
                         help='the edge threshold for filtering during explanation')
     parser.add_argument('--feat_threshold', dest='feat_threshold',
                         help='the feature threshold for filtering during explanation')
-    parser.add_argument('--edge_num_threshold_src_or_dst', dest='edge_num_threshold_src_or_dst',
-                        help='the max number of edges of the explanation results, for src or dst nodes')
+    parser.add_argument('--max_edges_num', dest='max_edges_num',
+                        help='the max number of edges of the explanation results')
 
     # TODO: Check argument usage
     parser.set_defaults(
@@ -175,7 +175,7 @@ def arg_parse():
         num_epochs=1000,
         edge_threshold=0.5,
         feat_threshold=0.5,
-        edge_num_threshold_src_or_dst=3,
+        max_edges_num=15,
         writer=False,
 
         # no change is ok for the following arguments:

@@ -100,9 +100,7 @@ class Explainer:
     def explain_a_set_of_links(self, args):
         src_explain_res = []
         dst_explain_res = []
-
-        src_denoise_res = []
-        dst_denoise_res = []
+        denoise_res = []
 
         # all positive links
         labels = edges = pred = None
@@ -126,40 +124,26 @@ class Explainer:
             print("src_idx: ", src_idx, ", dst_idx: ", dst_idx)
             print("src node label: ", self.node_labels[0][src_idx])
             print("dst node label: ", self.node_labels[0][dst_idx])
-            src_results, dst_results = self.explain_link(
+            src_explanation_results, dst_explanation_results = self.explain_link(
                     src_idx, dst_idx, link_label, pred_label, args
             )
-            src_explain_res.append(src_results)
-            dst_explain_res.append(dst_results)
+            src_explain_res.append(src_explanation_results)
+            dst_explain_res.append(dst_explanation_results)
 
-            src_masked_feat = src_results["src_masked_feat"]
-            src_masked_adj = src_results["src_masked_adj"]
-            src_idx_new = src_results["src_idx_new"]
-            src_neighbors = src_results["src_neighbors"]
-
-            dst_masked_feat = dst_results["dst_masked_feat"]
-            dst_masked_adj = dst_results["dst_masked_adj"]
-            dst_idx_new = dst_results["dst_idx_new"]
-            dst_neighbors = dst_results["dst_neighbors"]
-
-            src_denoise_result = io_utils.denoise_adj_feat(
-                self.graph, src_masked_adj, src_idx_new, src_masked_feat, src_neighbors,
-                edge_threshold=args.edge_threshold, feat_threshold=args.feat_threshold, edge_num_threshold=args.edge_num_threshold_src_or_dst, args=args
+            src_dst_explanation = io_utils.combine_src_dst_explanations(
+                src_explanation_results, dst_explanation_results
             )
-            if src_denoise_result is None:
-                continue
-            dst_denoise_result = io_utils.denoise_adj_feat(
-                self.graph, dst_masked_adj, dst_idx_new, dst_masked_feat, dst_neighbors,
-                edge_threshold=args.edge_threshold, feat_threshold=args.feat_threshold, edge_num_threshold=args.edge_num_threshold_src_or_dst, args=args
+
+            denoise_result = io_utils.denoise_adj_feat(
+                self.graph, index, src_dst_explanation, link_label,
+                edge_threshold=args.edge_threshold, feat_threshold=args.feat_threshold,
+                edge_num_threshold=args.max_edges_num, args=args
             )
-            if dst_denoise_result is None:
-                continue
-            src_denoise_res.append(src_denoise_result)
-            dst_denoise_res.append(dst_denoise_result)
 
-            io_utils.combine_src_dst_explanations(self.graph, index, src_idx, dst_idx, link_label, src_denoise_result, dst_denoise_result, args)
+            denoise_res.append(denoise_result)
 
-        return src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res
+        print("Have explained ", edges.shape[0], " links.")
+        return src_explain_res, dst_explain_res, denoise_res
 
     def explain_link(self, src_idx, dst_idx, link_label, pred_label, args, unconstrained=False, model="exp"):
         """Explain link prediction for a single node pair

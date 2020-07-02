@@ -127,37 +127,27 @@ def load_ckpt(args, isbest=False):
 
 
 def denoise_adj_feat(
-        graph, adj, node_idx, feat, neighbors,
+        graph, index, src_dst_explanation, link_label,
         edge_threshold=None, feat_threshold=None, edge_num_threshold=None,
         args=None
 ):
-    """Cleaning a graph by thresholding its node values.
 
-    Args:
-        - adj               :  Adjacency matrix.
-        - node_idx          :  Index of node to highlight (TODO ?)
-        - feat              :  An array of node features.
-        - label             :  A list of node labels.
-        - threshold         :  The weight threshold.
-        - max_component     :  TODO
-    """
+    src_idx = 0
+    dst_idx = 1
+    adj = src_dst_explanation["pattern_adj"]
+    feat = src_dst_explanation["pattern_feat"]
+    neighbors = src_dst_explanation["pattern_nodes"]
+
     if len(adj[adj > edge_threshold]) == 0:
         return None
-
-    num_nodes = adj.shape[0]
 
     # threshold definition-1
     threshold = threshold_num = 0
     if edge_num_threshold is not None:
-        # this is for symmetric graphs: edges are repeated twice in adj
-        adj_threshold_num = edge_num_threshold * 2  # undirected graph
-        if args.directed_graph is True:
-            adj_threshold_num = edge_num_threshold
-        # adj += np.random.rand(adj.shape[0], adj.shape[1]) * 1e-4
         neigh_size = len(adj[adj > 0])
         if neigh_size == 0:
             return None
-        threshold_num = min(neigh_size, adj_threshold_num)
+        threshold_num = min(neigh_size, edge_num_threshold)
         threshold = np.sort(adj[adj > 0])[-threshold_num]   # the threshold_num - th largest value in adj
     if edge_threshold < threshold:
         edge_threshold = threshold
@@ -167,77 +157,66 @@ def denoise_adj_feat(
     if edge_threshold < avg_threshold:
         edge_threshold = avg_threshold
 
+    # To get the max connected subgraph, thus use undirected graph.
+    pattern = nx.Graph()
+
     reserved_edge_list = []
     reserved_node_list = []
-    for i in range(num_nodes):
+    adj_sorted_values = -np.sort(-adj[adj > 0])
+    for i in range(adj_sorted_values.shape[0]):
         if len(reserved_edge_list) >= threshold_num:
             break
-        for j in range(num_nodes):
-            if adj[i, j] < edge_threshold:
-                continue
-            src_idx = neighbors[j]
-            dst_idx = neighbors[i]
-            reserved_node_list.append(i)
-            reserved_node_list.append(j)
-            if len(graph[src_idx][dst_idx]) == 1:
-                reserved_edge_list.append((src_idx, dst_idx, graph[src_idx][dst_idx][0]["label"]))
-            else:
-                for idx in reversed(range(len(graph[src_idx][dst_idx]))):
-                    reserved_edge_list.append(graph[src_idx][dst_idx][idx]['label'])
-            if len(reserved_edge_list) >= threshold_num:
-                break
+        if adj_sorted_values[i] < edge_threshold and src_idx in reserved_node_list and dst_idx in reserved_node_list and nx.is_connected(pattern):
+            break
+        position = np.where(adj == adj_sorted_values[i])
+        src = position[1][0]
+        dst = position[0][0]
+        reserved_node_list.append(src)
+        reserved_node_list.append(dst)
+        reserved_edge_list.append((src, dst))
+        pattern.add_edges_from([(src, dst)])
+
+    # largest_cc = max(nx.connected_components(pattern), key=len)
+    if not nx.is_connected(pattern) or len(pattern) == 0:
+        return None
 
     reserved_nodes = np.unique(reserved_node_list)
     reserved_feat = feat[reserved_nodes]
 
-    reserved_nodes = neighbors[reserved_nodes]   # idx -> original id in graph
-    if neighbors[node_idx] not in reserved_nodes:
+    if src_idx not in reserved_nodes and dst_idx not in reserved_nodes:
         return None
-    node_idx_new = np.where(reserved_nodes == neighbors[node_idx])[0][0]
 
     reserved_feat = torch.sigmoid(torch.tensor(reserved_feat)).detach().numpy()
     reserved_feat[reserved_feat >= feat_threshold] = 1
     reserved_feat[reserved_feat < feat_threshold] = 0
 
+    # renumber.
+    map_nodes = {}
+    for i in range(reserved_nodes.shape[0]):
+        map_nodes[reserved_nodes[i]] = i
+        reserved_nodes[i] = i
+    reserved_edges = []
+    for edge in reserved_edge_list:
+        src_oid = neighbors[edge[0]]
+        dst_oid = neighbors[edge[1]]
+        src_new_idx = map_nodes[edge[0]]
+        dst_new_idx = map_nodes[edge[1]]
+        if len(graph[src_oid][dst_oid]) == 1:
+            reserved_edges.append((src_new_idx, dst_new_idx, graph[src_oid][dst_oid][0]["label"]))
+        else:
+            for j in reversed(range(len(graph[src_oid][dst_oid]))):
+                reserved_edges.append((src_new_idx, dst_new_idx, graph[src_oid][dst_oid][j]["label"]))
+
     denoise_result = {
         "reserved_nodes": reserved_nodes,
-        "reserved_edge_list": reserved_edge_list,
+        "reserved_edge_list": reserved_edges,
         "reserved_feat": reserved_feat,
-        "node_idx_new": node_idx_new,
     }
-
-    return denoise_result
-
-
-def combine_src_dst_explanations(
-        graph, index, src_idx, dst_idx, link_label, src_denoise_result, dst_denoise_result, args
-):
-    # 1. combine explanations for src and dst in link(src, dst)
-    pattern_nodes = np.concatenate((src_denoise_result["reserved_nodes"], dst_denoise_result["reserved_nodes"]), axis=0)
-    pattern_edges = src_denoise_result["reserved_edge_list"] + dst_denoise_result["reserved_edge_list"]
-    src_features = src_denoise_result["reserved_feat"]
-    dst_features = dst_denoise_result["reserved_feat"]
-    pattern_edges = np.unique(pattern_edges, axis=0)
-
-    oid2newid_src = {}
-    oid2newid_dst = {}
-    for i in range(src_denoise_result["reserved_nodes"].shape[0]):
-        oid2newid_src[src_denoise_result["reserved_nodes"][i]] = i
-    for j in range(dst_denoise_result["reserved_nodes"].shape[0]):
-        oid2newid_dst[dst_denoise_result["reserved_nodes"][j]] = j
-
-    # 2. renumber.
-    pattern_nodes = filter(lambda x: x != src_idx and x != dst_idx, pattern_nodes)
-    pattern_nodes = [i for i in pattern_nodes]
-    pattern_nodes = np.unique(pattern_nodes)
-    map_nodes = {src_idx: 0, dst_idx: 1}
-    for i in range(pattern_nodes.shape[0]):
-        map_nodes[pattern_nodes[i]] = i + 2
 
     # 3. write the explanation results into file.
     path = "explanations/"
-    src_label = graph.nodes()[src_idx]["label"]
-    dst_label = graph.nodes()[dst_idx]["label"]
+    src_label = graph.nodes()[neighbors[src_idx]]["label"]
+    dst_label = graph.nodes()[neighbors[dst_idx]]["label"]
     suffix = str(src_label) + "_" + str(dst_label)
     link_type_set = []  # link type
     if args.single_edge_label:
@@ -254,27 +233,105 @@ def combine_src_dst_explanations(
         with open(path + args.dataset + ".explanation_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
             f.write("#\t" + str(index) + "\n")
             for node_oid, node_id in map_nodes.items():
-                f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[node_oid]["label"]))
-                important_attr = []
-                if node_oid in oid2newid_src.keys():
-                    node_oid_feat = src_features[oid2newid_src[node_oid]]
-                    for i in range(node_oid_feat.shape[0]):
-                        if node_oid_feat[i] == 1:
-                            important_attr.append(i)
-                if node_oid in oid2newid_dst.keys():
-                    node_oid_feat = dst_features[oid2newid_dst[node_oid]]
-                    for i in range(node_oid_feat.shape[0]):
-                        if node_oid_feat[i] == 1:
-                            important_attr.append(i)
-                important_attr = np.unique(important_attr)
-                for attr_id in important_attr:
-                    f.write("\t" + str(attr_id))
+                f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[neighbors[node_oid]]["label"]))
+                for attr_id in range(reserved_feat[node_id].shape[0]):
+                    if reserved_feat[node_id][attr_id] == 1:
+                        f.write("\t" + str(attr_id))
                 f.write("\n")
-            # for node_id in range(len(map_nodes)):
-            #     f.write("v\t" + str(node_id) + "\t" + str(self.graph.nodes()[node_id]["label"]) + "\n")
-            for edge in pattern_edges:
-                f.write("e\t" + str(map_nodes[edge[0]]) + "\t" + str(map_nodes[edge[1]]) + "\t" + str(edge[2]) + "\n")
+            for edge in reserved_edges:
+                f.write("e\t" + str(edge[0]) + "\t" + str(edge[1]) + "\t" + str(edge[2]) + "\n")
         f.close()
+
+    return denoise_result
+
+
+def combine_src_dst_explanations(
+        src_explanation_results, dst_explanation_results
+):
+    src_masked_feat = src_explanation_results["src_masked_feat"]
+    src_masked_adj = src_explanation_results["src_masked_adj"]
+    src_idx_new = src_explanation_results["src_idx_new"]
+    src_neighbors = src_explanation_results["src_neighbors"]
+
+    dst_masked_feat = dst_explanation_results["dst_masked_feat"]
+    dst_masked_adj = dst_explanation_results["dst_masked_adj"]
+    dst_idx_new = dst_explanation_results["dst_idx_new"]
+    dst_neighbors = dst_explanation_results["dst_neighbors"]
+
+    pattern_nodes = np.concatenate((src_neighbors, dst_neighbors), axis=0).tolist()
+    pattern_nodes = np.unique(pattern_nodes)
+    num_nodes = pattern_nodes.shape[0]
+    num_src_nodes = src_masked_adj.shape[0]
+    num_dst_nodes = dst_masked_adj.shape[0]
+
+    oid2newid_src = {}
+    oid2newid_dst = {}
+    for i in range(src_neighbors.shape[0]):
+        oid2newid_src[src_neighbors[i]] = i
+    for j in range(dst_neighbors.shape[0]):
+        oid2newid_dst[dst_neighbors[j]] = j
+
+    # 2. renumber.
+    pattern_nodes = filter(lambda x: x != src_neighbors[src_idx_new] and x != dst_neighbors[dst_idx_new], pattern_nodes)
+    pattern_nodes = [i for i in pattern_nodes]
+    pattern_nodes = np.unique(pattern_nodes)
+    map_nodes = {src_neighbors[src_idx_new]: 0, dst_neighbors[dst_idx_new]: 1}
+    for i in range(pattern_nodes.shape[0]):
+        map_nodes[pattern_nodes[i]] = i + 2
+    pattern_nodes = np.insert(pattern_nodes, 0, dst_neighbors[dst_idx_new])
+    pattern_nodes = np.insert(pattern_nodes, 0, src_neighbors[src_idx_new])
+
+    # adj_list = []
+    # for i in range(num_src_nodes):
+    #     for j in range(num_src_nodes):
+    #         if src_masked_adj[i, j] > 0:
+    #             adj_list.append((map_nodes[src_neighbors[j]], map_nodes[src_neighbors[i]]))
+    # for i in range(num_dst_nodes):
+    #     for j in range(num_dst_nodes):
+    #         if dst_masked_adj[i, j] > 0:
+    #             adj_list.append((map_nodes[dst_neighbors[j]], map_nodes[dst_neighbors[i]]))
+    #
+    # pattern = nx.MultiDiGraph()
+    # pattern.add_nodes_from(range(num_nodes))
+    # pattern.add_edges_from(adj_list)
+    # pattern_adj = nx.to_numpy_array(pattern)
+    # pattern_adj = pattern_adj.transpose()
+
+    pattern_adj = np.zeros((num_nodes, num_nodes))
+    for i in range(num_src_nodes):
+        for j in range(num_src_nodes):
+            if src_masked_adj[i, j] > 0:
+                pattern_adj[map_nodes[src_neighbors[i]]][map_nodes[src_neighbors[j]]] = src_masked_adj[i, j]
+    for i in range(num_dst_nodes):
+        for j in range(num_dst_nodes):
+            if dst_masked_adj[i, j] > 0:
+                weight = pattern_adj[map_nodes[dst_neighbors[i]]][map_nodes[dst_neighbors[j]]]
+                if weight == 1:
+                    weight = 0
+                if weight < dst_masked_adj[i, j]:
+                    pattern_adj[map_nodes[dst_neighbors[i]]][map_nodes[dst_neighbors[j]]] = dst_masked_adj[i, j]
+
+    src_idx_new = 0
+    dst_idx_new = 1
+
+    pattern_feat = np.zeros((num_nodes, src_masked_feat.shape[1]))
+    for pattern_v in pattern_nodes:
+        if pattern_v in oid2newid_src.keys():
+            pattern_feat[map_nodes[pattern_v]] = src_masked_feat[oid2newid_src[pattern_v]]
+        if pattern_v in oid2newid_dst.keys():
+            if pattern_feat[map_nodes[pattern_v]][0] != 0:
+                for feat_dim in range(src_masked_feat.shape[1]):
+                    if pattern_feat[map_nodes[pattern_v]][feat_dim] < dst_masked_feat[oid2newid_dst[pattern_v]][feat_dim]:
+                        pattern_feat[map_nodes[pattern_v]][feat_dim] = dst_masked_feat[oid2newid_dst[pattern_v]][feat_dim]
+            else:
+                pattern_feat[map_nodes[pattern_v]] = dst_masked_feat[oid2newid_dst[pattern_v]]
+
+    pattern = {
+        "pattern_nodes": pattern_nodes,
+        "pattern_adj": pattern_adj,
+        "pattern_feat": pattern_feat,
+    }
+    return pattern
 
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
