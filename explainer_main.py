@@ -141,8 +141,6 @@ def arg_parse():
 
     parser.add_argument('--link_prediction', dest='link_prediction',
                         help='whether do link prediction task')
-    parser.add_argument('--directed_graph', dest='directed_graph',
-                        help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
     parser.add_argument('--multi_class', dest='multi_class',
@@ -165,7 +163,6 @@ def arg_parse():
         logdir="log",
         ckptdir="ckpt",
         dataset="USAir",
-        directed_graph=True,
         link_prediction=True,
         single_edge_label=True,
         multi_class=False,
