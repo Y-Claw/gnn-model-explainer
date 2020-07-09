@@ -163,18 +163,30 @@ def denoise_adj_feat(
     reserved_edge_list = []
     reserved_node_list = []
     adj_sorted_values = -np.sort(-adj[adj > 0])
+    flag = 0
     for i in range(adj_sorted_values.shape[0]):
-        if len(reserved_edge_list) >= threshold_num:
-            break
-        if adj_sorted_values[i] < edge_threshold and src_idx in reserved_node_list and dst_idx in reserved_node_list and nx.is_connected(pattern):
-            break
+        # if len(reserved_edge_list) >= threshold_num:
+        #     break
+        # if adj_sorted_values[i] < edge_threshold and src_idx in reserved_node_list and dst_idx in reserved_node_list and nx.is_connected(pattern):
+        #     break
         position = np.where(adj == adj_sorted_values[i])
-        src = position[1][0]
-        dst = position[0][0]
-        reserved_node_list.append(src)
-        reserved_node_list.append(dst)
-        reserved_edge_list.append((src, dst))
-        pattern.add_edges_from([(src, dst)])
+        for j in range(position[0].shape[0]):
+            src = position[1][j]
+            dst = position[0][j]
+            reserved_node_list.append(src)
+            reserved_node_list.append(dst)
+            reserved_edge_list.append((src, dst))
+            pattern.add_edges_from([(src, dst)])
+
+            if len(reserved_edge_list) >= threshold_num:
+                flag = 1
+                break
+
+            if src_idx in reserved_node_list and dst_idx in reserved_node_list and nx.is_connected(pattern):
+                flag = 1
+                break
+        if flag == 1:
+            break
 
     # largest_cc = max(nx.connected_components(pattern), key=len)
     if not nx.is_connected(pattern) or len(pattern) == 0:
@@ -215,8 +227,8 @@ def denoise_adj_feat(
 
     # 3. write the explanation results into file.
     path = "explanations/"
-    src_label = graph.nodes()[neighbors[src_idx]]["label"]
-    dst_label = graph.nodes()[neighbors[dst_idx]]["label"]
+    src_label = graph.nodes[neighbors[src_idx]]["label"]
+    dst_label = graph.nodes[neighbors[dst_idx]]["label"]
     suffix = str(src_label) + "_" + str(dst_label)
     link_type_set = []  # link type
     if args.single_edge_label:
@@ -306,8 +318,6 @@ def combine_src_dst_explanations(
         for j in range(num_dst_nodes):
             if dst_masked_adj[i, j] > 0:
                 weight = pattern_adj[map_nodes[dst_neighbors[i]]][map_nodes[dst_neighbors[j]]]
-                if weight == 1:
-                    weight = 0
                 if weight < dst_masked_adj[i, j]:
                     pattern_adj[map_nodes[dst_neighbors[i]]][map_nodes[dst_neighbors[j]]] = dst_masked_adj[i, j]
 
