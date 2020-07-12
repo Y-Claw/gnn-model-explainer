@@ -382,6 +382,7 @@ class ExplainModule(nn.Module):
 
     def construct_edge_mask(self, num_nodes, init_strategy="normal", const_val=1.0):
         mask = nn.Parameter(torch.FloatTensor(num_nodes, num_nodes))
+        # mask = torch.nn.init.constant_(mask, 0)
         if init_strategy == "normal":
             std = nn.init.calculate_gain("relu") * math.sqrt(
                 2.0 / (num_nodes + num_nodes)

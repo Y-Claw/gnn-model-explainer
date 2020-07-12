@@ -18,6 +18,16 @@ import utils.io_utils as io_utils
 import utils.parser_utils as parser_utils
 from explainer import explain
 import sys
+import random
+import numpy as np
+
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
 
 
 def arg_parse():
@@ -274,5 +284,6 @@ def main():
 
 
 if __name__ == "__main__":
+    setup_seed(1226)
     main()
 
