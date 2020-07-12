@@ -132,8 +132,8 @@ def denoise_adj_feat(
         args=None
 ):
 
-    src_idx = 0
-    dst_idx = 1
+    src_idx = src_dst_explanation["src_idx_new"]
+    dst_idx = src_dst_explanation["dst_idx_new"]
     adj = src_dst_explanation["pattern_adj"]
     feat = src_dst_explanation["pattern_feat"]
     neighbors = src_dst_explanation["pattern_nodes"]
@@ -182,9 +182,13 @@ def denoise_adj_feat(
                 flag = 1
                 break
 
-            if src_idx in reserved_node_list and dst_idx in reserved_node_list and nx.is_connected(pattern):
+            if dst_idx == 1 and src_idx in reserved_node_list and dst_idx in reserved_node_list and nx.is_connected(pattern):
                 flag = 1
                 break
+            if dst_idx == 0 and src_idx in reserved_node_list and nx.is_connected(pattern) and adj_sorted_values[i] <= edge_threshold:
+                flag = 1
+                break
+
         if flag == 1:
             break
 
@@ -242,7 +246,12 @@ def denoise_adj_feat(
 
     for link_type in link_type_set:
         suffix = suffix + "_" + str(link_type)
-        with open(path + args.dataset + ".explanation_" + suffix + "_" + str(args.n_hops) + "hops", "a+") as f:
+        file_name = None
+        if src_idx == dst_idx:
+            file_name = path + args.dataset + ".explanation_" + suffix + "_" + str(args.n_hops) + "hops_self_link"
+        else:
+            file_name = path + args.dataset + ".explanation_" + suffix + "_" + str(args.n_hops) + "hops"
+        with open(file_name, "a+") as f:
             f.write("#\t" + str(index) + "\n")
             for node_oid, node_id in map_nodes.items():
                 f.write("v\t" + str(node_id) + "\t" + str(graph.nodes()[neighbors[node_oid]]["label"]))
@@ -269,6 +278,16 @@ def combine_src_dst_explanations(
     dst_masked_adj = dst_explanation_results["dst_masked_adj"]
     dst_idx_new = dst_explanation_results["dst_idx_new"]
     dst_neighbors = dst_explanation_results["dst_neighbors"]
+
+    if src_neighbors[src_idx_new] == dst_neighbors[dst_idx_new]:
+        pattern = {
+            "pattern_nodes": src_neighbors,
+            "pattern_adj": src_masked_adj,
+            "pattern_feat": src_masked_feat,
+            "src_idx_new": 0,
+            "dst_idx_new": 0,
+        }
+        return pattern
 
     pattern_nodes = np.concatenate((src_neighbors, dst_neighbors), axis=0).tolist()
     pattern_nodes = np.unique(pattern_nodes)
@@ -340,6 +359,8 @@ def combine_src_dst_explanations(
         "pattern_nodes": pattern_nodes,
         "pattern_adj": pattern_adj,
         "pattern_feat": pattern_feat,
+        "src_idx_new": src_idx_new,
+        "dst_idx_new": dst_idx_new,
     }
     return pattern
 
