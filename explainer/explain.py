@@ -115,8 +115,10 @@ class Explainer:
             labels = np.concatenate((self.test_labels, self.train_labels), axis=1)
             edges = np.concatenate((self.test_idx, self.train_idx), axis=0)
             pred = np.concatenate((self.pred_test, self.pred_train), axis=1)
+        print("whole links num: ", edges.shape[0])
 
         for index in range(edges.shape[0]):
+            print("For the " + str(index) + "-th link:")
             src_idx = edges[index][0]
             dst_idx = edges[index][1]
             link_label = labels[0][index]

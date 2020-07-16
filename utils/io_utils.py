@@ -162,7 +162,8 @@ def denoise_adj_feat(
 
     reserved_edge_list = []
     reserved_node_list = []
-    adj_sorted_values = -np.sort(-adj[adj > 0])
+    adj_sorted_values = -np.sort(-adj[adj > 0])[:50]
+    adj_sorted_values = -np.sort(-np.unique(adj_sorted_values))
     flag = 0
     for i in range(adj_sorted_values.shape[0]):
         # if len(reserved_edge_list) >= threshold_num:
