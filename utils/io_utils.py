@@ -174,6 +174,8 @@ def denoise_adj_feat(
         for j in range(position[0].shape[0]):
             src = position[1][j]
             dst = position[0][j]
+            if src == src_idx and dst == dst_idx:
+            	continue
             reserved_node_list.append(src)
             reserved_node_list.append(dst)
             reserved_edge_list.append((src, dst))
