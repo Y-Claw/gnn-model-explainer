@@ -39,6 +39,7 @@ import sys
 
 import models
 
+import ogb_models
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -242,7 +243,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     num_nodes = G.number_of_nodes()
 
     # adj_origin = nx.adjacency_matrix(G)
-    adj_origin = nx.to_numpy_array(G)
+    adj_origin = nx.to_scipy_sparse_matrix(G)
     # adj_origin = [[0] * num_nodes] * num_nodes
     # adj_origin = np.array(adj_origin)
     # edges = list(G.edges())
@@ -258,11 +259,18 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     for i, u in enumerate(G.nodes()):
         x[i, :] = G.nodes[u]["feat"]
 
-    adj = np.expand_dims(adj, axis=0)
-    x = np.expand_dims(x, axis=0)
+    if 'ogb' not in args.model:
+        adj_origin = nx.to_numpy_array(G)
+        adj = adj_origin.transpose()
+        adj = np.expand_dims(adj, axis=0)
+        adj = torch.tensor(adj, dtype=torch.float)
+        x = np.expand_dims(x, axis=0)
+    else:
+        adj = torch.tensor(list(G.to_undirected().edges))
+        #adj = np.expand_dims(adj, axis=0)
+
     train_labels = np.expand_dims(train_labels, axis=0)
 
-    adj = torch.tensor(adj, dtype=torch.float)
     x = torch.tensor(x, requires_grad=True, dtype=torch.float)
     train_labels = torch.tensor(train_labels, dtype=torch.long)
     train_data = torch.tensor(train_data, dtype=torch.long)
@@ -721,28 +729,39 @@ def link_prediction_task(args, writer=None):
 
     start_time = time.time()
     model = None
-    if args.single_edge_label:
-        model = models.GcnEncoderNode(
+    if args.model == "GcnEncoderNode":
+        if args.single_edge_label:
+            model = models.GcnEncoderNode(
+                input_dim,
+                args.hidden_dim,
+                args.output_dim,
+                2,   # binary classification for link prediction.
+                args.num_gc_layers,
+                bn=args.bn,
+                dropout=args.dropout,
+                args=args,
+            )
+        elif args.multi_label or args.multi_class:
+            model = models.GcnEncoderNode(
+                input_dim,
+                args.hidden_dim,
+                args.output_dim,
+                num_edge_labels,
+                args.num_gc_layers,
+                bn=args.bn,
+                dropout=args.dropout,
+                args=args,
+            )
+    elif args.model == "ogb_GCN":
+        model = ogb_models.GCN(
             input_dim,
             args.hidden_dim,
             args.output_dim,
-            2,   # binary classification for link prediction.
-            args.num_gc_layers,
-            bn=args.bn,
+            num_layers=args.num_gc_layers,
             dropout=args.dropout,
-            args=args,
+            feature_dim=num_edge_labels,
         )
-    elif args.multi_label or args.multi_class:
-        model = models.GcnEncoderNode(
-            input_dim,
-            args.hidden_dim,
-            args.output_dim,
-            num_edge_labels,
-            args.num_gc_layers,
-            bn=args.bn,
-            dropout=args.dropout,
-            args=args,
-        )
+
     if args.gpu:
         model = model.cuda()
     end_time = time.time()
