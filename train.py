@@ -785,7 +785,7 @@ def link_prediction_task(args, writer=None):
 
     # method-2: generate data of a batch size, then make prediction
     start_time = time.time()
-    predict_batch(original_graph, num_edge_labels, model, args)
+    #predict_batch(original_graph, num_edge_labels, model, args)
     end_time = time.time()
     print("whole predicting time: ", (end_time - start_time))
 
