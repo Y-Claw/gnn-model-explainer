@@ -74,16 +74,10 @@ class GCN(torch.nn.Module):
 
         x = torch.squeeze(x)
         adj_t = torch.squeeze(adj_t)
-<<<<<<< HEAD
         
         adj_t = adj_t[:, [0,1]].transpose(0,1)
-        adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1) 
-        #print(adj_t)
-
-=======
-        adj_t = adj_t[:, [0,1]].transpose(0,1)
         #adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1)
->>>>>>> ed4306441fdbc5b00c89a2d1485d0fd5dec8852d
+        
         src_idx = train_edges[:, 0]
         dst_idx = train_edges[:, 1]
 
@@ -91,12 +85,8 @@ class GCN(torch.nn.Module):
             x = conv(x, adj_t, None)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
-<<<<<<< HEAD
-        self.embedding_tensor = self.convs[-1](x, adj_t, None)
-=======
         self.embedding_tensor = self.convs[-1](x, adj_t)
         #self.embedding_tensor = F.normalize(self.embedding_tensor)
->>>>>>> ed4306441fdbc5b00c89a2d1485d0fd5dec8852d
 
         if x2 is not None and adj2 is None:
             x2 = torch.squeeze(x2)
@@ -122,9 +112,6 @@ class GCN(torch.nn.Module):
     def loss(self, pred, label):
         #label = torch.squeeze(label)
         #pred = torch.squeeze(pred, -1)
-<<<<<<< HEAD
-        return self.bceloss(pred, label.float())
-=======
         if self.single_edge_label or self.multi_class:
             pred = torch.transpose(pred, 1, 2)
             return self.celoss(pred, label)
@@ -184,4 +171,3 @@ class SAGE(torch.nn.Module):
             x = self.lin2(x)
 
         return x
->>>>>>> ed4306441fdbc5b00c89a2d1485d0fd5dec8852d
