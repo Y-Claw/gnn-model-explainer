@@ -66,15 +66,19 @@ class GCN(torch.nn.Module):
 
         x = torch.squeeze(x)
         adj_t = torch.squeeze(adj_t)
+        
+        adj_t = adj_t[:, [0,1]].transpose(0,1)
+        adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1) 
+        #print(adj_t)
 
         src_idx = train_edges[:, 0]
         dst_idx = train_edges[:, 1]
 
         for conv in self.convs[:-1]:
-            x = conv(x, adj_t)
+            x = conv(x, adj_t, None)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
-        self.embedding_tensor = self.convs[-1](x, adj_t)
+        self.embedding_tensor = self.convs[-1](x, adj_t, None)
 
         if x2 is not None and adj2 is None:
             x2 = torch.squeeze(x2)
