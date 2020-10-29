@@ -279,8 +279,12 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     scheduler, optimizer = train_utils.build_optimizer(
         args, model.parameters(), weight_decay=args.weight_decay
     )
+
     model.train()
+    if args.model == "ogb_GCN":
+        model.reset_parameters()
     ypred_train = None
+
     for epoch in range(args.num_epochs):
         begin_time = time.time()
 
@@ -693,8 +697,12 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
 
         # auc_train = metrics.roc_curve(train_labels.ravel(), ypred_train.ravel())
         # auc_test = metrics.roc_curve(test_labels.ravel(), ypred_test.ravel())
-        auc_train = metrics.roc_auc_score(train_labels, ypred_train)
-        auc_test = metrics.roc_auc_score(test_labels, ypred_test)
+        if (train_labels.shape[-1] != 1):
+            auc_train = metrics.roc_auc_score(train_labels, ypred_train)
+            auc_test = metrics.roc_auc_score(test_labels, ypred_test)
+        else:
+            auc_train = 0
+            auc_test = 0
 
         result_train = {
             "prec": prec_train,
@@ -759,7 +767,8 @@ def link_prediction_task(args, writer=None):
             args.output_dim,
             num_layers=args.num_gc_layers,
             dropout=args.dropout,
-            feature_dim=num_edge_labels,
+            feature_dim=2 if args.single_edge_label else num_edge_labels,
+            args=args,
         )
 
     if args.gpu:
