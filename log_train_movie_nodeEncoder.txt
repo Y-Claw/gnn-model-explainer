@@ -1,0 +1,2 @@
+srun: error: dell-gpu-09: task 0: Killed
+srun: Force Terminated job step 94898.0
