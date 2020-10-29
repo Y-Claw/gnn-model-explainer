@@ -1,2 +1,6 @@
-srun: error: dell-gpu-09: task 0: Killed
-srun: Force Terminated job step 94898.0
+srun: job 95093 queued and waiting for resources
+srun: job 95093 has been allocated resources
+srun: Force Terminated job 95093
+srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
+slurmstepd-dell-gpu-03: error: *** STEP 95093.0 ON dell-gpu-03 CANCELLED AT 2020-10-29T16:45:37 ***
+srun: error: dell-gpu-03: task 0: Terminated

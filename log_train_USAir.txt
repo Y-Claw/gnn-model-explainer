@@ -1,0 +1,21 @@
+srun: job 95103 queued and waiting for resources
+srun: job 95103 has been allocated resources
+CUDA 1
+load graph time:  0.031121253967285156
+Num training edges:  680 ; Num testing edges:  170
+Number of edges left:  1701
+prepare training and testing data time:  0.005089521408081055
+construct model time:  5.8680620193481445
+generate  108098 predict data
+generate predict data time:  0.11028766632080078
+Traceback (most recent call last):
+  File "train.py", line 664, in <module>
+    main()
+  File "train.py", line 654, in main
+    link_prediction_task(prog_args, writer=None)
+  File "train.py", line 630, in link_prediction_task
+    model = train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
+  File "train.py", line 260, in train_link_classifier
+    ypred_train, adj_att = model(x.cuda(), adj.cuda(), train_data.cuda())
+AttributeError: 'numpy.ndarray' object has no attribute 'cuda'
+srun: error: dell-gpu-03: task 0: Exited with exit code 1
