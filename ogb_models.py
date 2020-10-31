@@ -11,6 +11,8 @@ from torch_geometric.nn import GCNConv, SAGEConv
 
 import numpy as np
 
+import scipy.sparse as sp
+
 class LinkPredictor(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers,
                  dropout):
@@ -35,11 +37,14 @@ class LinkPredictor(torch.nn.Module):
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
+        x = F.normalize(x, p=2, dim=-1)
+        self.x = x
+        self.x.retain_grad()
         return torch.sigmoid(x)
 
 class GCN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers,
-                 dropout, args, feature_dim=2):
+                args, dropout=0, feature_dim=2):
         super(GCN, self).__init__()
 
         self.convs = torch.nn.ModuleList()
@@ -71,34 +76,80 @@ class GCN(torch.nn.Module):
         self.predictor.reset_parameters();
 
     def forward(self, x, adj_t, train_edges, x2=None, adj2=None, batch_num_nodes=None, **kwargs):
+        adj_t_origin = adj_t
+        adj2_origin = adj2
+
+        src_edge_weight = None
+        dst_edge_weight = None
+
+        if type(adj_t) == sp.coo.coo_matrix:
+            #adj_t = adj_t.tocoo().astype(np.float32)
+            adj_t = torch.from_numpy(
+                np.vstack((adj_t.row, adj_t.col)).astype(np.int64)
+            )
+        elif type(adj_t) == torch.Tensor:
+            #adj_t = adj_t.tocoo().astype(np.float32)
+            adj_t = torch.squeeze(adj_t)
+            adj_t = adj_t + adj_t.transpose(0, 1)
+            adj_t = torch.nonzero(adj_t).transpose(0,1)
+        else:
+            adj_t = adj_t[:, [0, 1]].transpose(0, 1)
+            adj_t = torch.squeeze(adj_t)
+
+        if adj2 is not None and type(adj2) == sp.coo.coo_matrix:
+            adj2 = torch.from_numpy(
+                np.vstack((adj2.row, adj2.col)).astype(np.int64)
+            )
+        elif adj2 is not None and type(adj2) == torch.Tensor:
+            # adj_t = adj_t.tocoo().astype(np.float32)
+            adj2 = torch.squeeze(adj2)
+            adj2 = adj2 + adj2.transpose(0,1)
+            adj2 = torch.nonzero(adj2).transpose(0, 1)
+        elif adj2 is not None:
+            adj2 = adj2[:, [0, 1]].transpose(0, 1)
+            adj2 = torch.squeeze(adj2)
 
         x = torch.squeeze(x)
-        adj_t = torch.squeeze(adj_t)
-        
-        adj_t = adj_t[:, [0,1]].transpose(0,1)
+
         #adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1)
-        
-        src_idx = train_edges[:, 0]
-        dst_idx = train_edges[:, 1]
+        if adj2 is None:
+            src_idx = train_edges[:, 0]
+            dst_idx = train_edges[:, 1]
+        else:
+            src_idx = train_edges[0]
+            dst_idx = train_edges[1]
+            src_edge_weight = [adj_t_origin[0,i,j].unsqueeze(0) if i < j else adj_t_origin[0,j,i].unsqueeze(0) for [i, j] in adj_t.permute(1, 0)]
+            src_edge_weight = torch.cat(src_edge_weight)
+            self.src_edge_weight = src_edge_weight
+
+            self.src_edge_weight.retain_grad()
+            dst_edge_weight = [adj2_origin[0,i,j].unsqueeze(0) if i < j else adj2_origin[0,j,i].unsqueeze(0) for [i, j] in adj2.permute(1, 0)]
+            dst_edge_weight = torch.cat(dst_edge_weight)
+            self.dst_edge_weight = dst_edge_weight
+
+            self.dst_edge_weight.retain_grad()
 
         for conv in self.convs[:-1]:
-            x = conv(x, adj_t, None)
+            x = conv(x, adj_t, edge_weight=src_edge_weight)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         self.embedding_tensor = self.convs[-1](x, adj_t)
-        #self.embedding_tensor = F.normalize(self.embedding_tensor)
+        #self.embedding_tensor = F.normalize(self.embedding_tensor, p=2, dim=-1)
+        self.embedding_tensor.retain_grad()
 
-        if x2 is not None and adj2 is None:
+        if x2 is not None and adj2 is not None:
             x2 = torch.squeeze(x2)
             adj2 = torch.squeeze(adj2)
             for conv in self.convs[:-1]:
-                x2 = conv(x2, adj2)
+                x2 = conv(x2, adj2, dst_edge_weight)
                 x2 = F.relu(x2)
                 x2 = F.dropout(x2, p=self.dropout, training=self.training)
             self.dst_embedding_tensor = self.convs[-1](x2, adj2)
+            #self.dst_embedding_tensor = F.normalize(self.dst_embedding_tensor, p=2, dim=-1)
+            self.dst_embedding_tensor.retain_grad()
 
-        if x2 is not None and adj2 is None:
-            pred = self.pred_model(
+        if x2 is not None and adj2 is not None:
+            pred = self.predictor(
                 self.embedding_tensor[train_edges[0]], self.dst_embedding_tensor[train_edges[1]]
             )
         else:

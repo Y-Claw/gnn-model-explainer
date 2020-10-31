@@ -218,6 +218,8 @@ def denoise_adj_feat(
     for edge in reserved_edge_list:
         src_oid = neighbors[edge[0]]
         dst_oid = neighbors[edge[1]]
+        if (src_oid > dst_oid):
+            continue
         src_new_idx = map_nodes[edge[0]]
         dst_new_idx = map_nodes[edge[1]]
         if len(graph[src_oid][dst_oid]) == 1:

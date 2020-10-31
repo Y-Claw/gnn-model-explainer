@@ -6,6 +6,7 @@ import networkx as nx
 import numpy as np
 import torch
 import torch.utils.data
+import scipy.sparse as sp
 
 
 class GraphSampler(torch.utils.data.Dataset):
@@ -146,13 +147,16 @@ class GraphSampler(torch.utils.data.Dataset):
 
 def neighborhoods(adj, n_hops, use_cuda):
     """Returns the n_hops degree adjacency matrix adj."""
-    adj = torch.tensor(adj, dtype=torch.float)
+    """adj = torch.tensor(adj, dtype=torch.float)
     if use_cuda:
-        adj = adj.cuda()
+        adj = adj.cuda()"""
     hop_adj = power_adj = adj
     for i in range(n_hops - 1):
         power_adj = power_adj @ adj
         prev_hop_adj = hop_adj
         hop_adj = hop_adj + power_adj
-        hop_adj = (hop_adj > 0).float()
-    return hop_adj.cpu().numpy().astype(int)
+        #hop_adj = (hop_adj > 0).float()
+        temp = (hop_adj > 0).nonzero()
+        hop_adj = sp.coo_matrix(([1] * temp[0].shape[0], temp))
+    #return hop_adj.cpu().numpy().astype(int)
+    return [hop_adj.tocsc()]

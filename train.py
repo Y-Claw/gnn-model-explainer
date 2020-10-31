@@ -243,7 +243,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     num_nodes = G.number_of_nodes()
 
     # adj_origin = nx.adjacency_matrix(G)
-    adj_origin = nx.to_scipy_sparse_matrix(G)
+    adj_origin = nx.to_scipy_sparse_matrix(G).tocoo()
     # adj_origin = [[0] * num_nodes] * num_nodes
     # adj_origin = np.array(adj_origin)
     # edges = list(G.edges())
@@ -260,13 +260,14 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
         x[i, :] = G.nodes[u]["feat"]
 
     if 'ogb' not in args.model:
-        adj_origin = nx.to_numpy_array(G)
-        adj = adj_origin.transpose()
+        #adj_origin = nx.to_numpy_array(G)
+        #adj = adj_origin.transpose()
         adj = np.expand_dims(adj, axis=0)
         adj = torch.tensor(adj, dtype=torch.float)
         x = np.expand_dims(x, axis=0)
     else:
-        adj = torch.tensor(list(G.to_undirected().edges))
+        print('empty')
+        #adj = torch.tensor(list(G.to_undirected().edges))
         #adj = np.expand_dims(adj, axis=0)
 
     train_labels = np.expand_dims(train_labels, axis=0)
@@ -394,8 +395,8 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
         ypred_test = model(x, adj, test_data)
     cg_data = {
         "graph": G,
-        "adj": adj.numpy(),
-        "feat": x.detach().numpy(),
+        "adj": nx.to_scipy_sparse_matrix(G).tocoo(),
+        "feat": x.reshape([1]+list(x.shape[-2:])).detach().numpy(),
         "node_labels": np.expand_dims(node_labels, axis=0),
         "label_train": train_labels.numpy(),
         "label_test": np.expand_dims(test_labels, axis=0),

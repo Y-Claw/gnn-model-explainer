@@ -21,6 +21,7 @@ import sys
 import random
 import numpy as np
 
+import ogb_models
 
 def setup_seed(seed):
     torch.manual_seed(seed)
@@ -165,6 +166,8 @@ def arg_parse():
                         help='the feature threshold for filtering during explanation')
     parser.add_argument('--max_edges_num', dest='max_edges_num',
                         help='the max number of edges of the explanation results')
+    parser.add_argument('--model', dest='model',
+                        help='the model you use to train')
 
     # TODO: Check argument usage
     parser.set_defaults(
@@ -204,6 +207,7 @@ def arg_parse():
         mask_act="sigmoid",
         multigraph_class=-1,
         multinode_class=-1,
+        model='GcnEncoderNode',
     )
     return parser.parse_args()
 
@@ -232,23 +236,34 @@ def main():
     # Load a model checkpoint
     ckpt = io_utils.load_ckpt(prog_args)
     cg_dict = ckpt["cg"]  # get computation graph
-    input_dim = cg_dict["feat"].shape[2] 
-    num_classes = cg_dict["pred_train"].shape[2]
+    input_dim = cg_dict["feat"].shape[-1]
+    num_classes = cg_dict["pred_train"].shape[-1]
     print("Loaded model from {}".format(prog_args.ckptdir))
     print("input dim: ", input_dim, "; num classes: ", num_classes)
 
     # build model
     print("Method: ", prog_args.method)
     if prog_args.link_prediction is True:
-        model = models.GcnEncoderNode(
-            input_dim=input_dim,
-            hidden_dim=prog_args.hidden_dim,
-            embedding_dim=prog_args.output_dim,
-            label_dim=num_classes,
-            num_layers=prog_args.num_gc_layers,
-            bn=prog_args.bn,
-            args=prog_args,
-        )
+        if prog_args.model=='GcnEncoderNode':
+            model = models.GcnEncoderNode(
+                input_dim=input_dim,
+                hidden_dim=prog_args.hidden_dim,
+                embedding_dim=prog_args.output_dim,
+                label_dim=num_classes,
+                num_layers=prog_args.num_gc_layers,
+                bn=prog_args.bn,
+                args=prog_args,
+            )
+        elif prog_args.model=='ogb_GCN':
+            model = ogb_models.GCN(
+                input_dim,
+                prog_args.hidden_dim,
+                prog_args.output_dim,
+                num_layers=prog_args.num_gc_layers,
+                feature_dim=num_classes,
+                args=prog_args,
+            )
+
     if prog_args.gpu:
         model = model.cuda()
     # load state_dict (obtained by model.state_dict() when saving checkpoint)

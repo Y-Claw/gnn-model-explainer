@@ -84,14 +84,14 @@ class Explainer:
         """Returns the n_hops neighborhood of a given ndoe."""
         neighbors_adj_row = self.neighborhoods[0][node_idx, :]          # in-edges
         neighbors_adj_column = self.neighborhoods[0][:, node_idx]       # out-edges
-        n1 = np.nonzero(neighbors_adj_row)[0]
+        n1 = np.nonzero(neighbors_adj_row)[1]
         n2 = np.nonzero(neighbors_adj_column)[0]
         neighbors = np.concatenate((n1, n2))
         neighbors = np.insert(neighbors, 0, node_idx)
         neighbors = np.unique(neighbors)
 
         node_idx_new = np.where(neighbors == node_idx)[0][0]
-        sub_adj = self.adj[0][neighbors][:, neighbors]
+        sub_adj = self.adj.todense()[neighbors][:, neighbors]
         sub_feat = self.feat[0, neighbors]
         sub_node_label = self.node_labels[:, neighbors]
 
@@ -198,6 +198,8 @@ class Explainer:
             explainer.optimizer.zero_grad()
             ypred = explainer(unconstrained=unconstrained)
             loss = explainer.loss(ypred, pred_label, epoch)
+            loss.retain_grad()
+            ypred.retain_grad()
             loss.backward()
 
             explainer.optimizer.step()
@@ -362,7 +364,7 @@ class ExplainModule(nn.Module):
         self.scheduler, self.optimizer = train_utils.build_optimizer(args, params)
 
         self.coeffs = {
-            "size": 0.005,
+            "size": 0.00005,
             "feat_size": 1.0,
             "ent": 1.0,
             "feat_ent": 0.1,
@@ -469,7 +471,9 @@ class ExplainModule(nn.Module):
                 else:
                     self.src_masked_x = src_x * src_feat_mask
                     self.dst_masked_x = dst_x * dst_feat_mask
-
+        self.src_masked_x.retain_grad()
+        self.src_masked_adj.retain_grad()
+        self.dst_masked_adj.retain_grad()
         ypred = self.model(self.src_masked_x, self.src_masked_adj, [self.src_idx_new, self.dst_idx_new], self.dst_masked_x, self.dst_masked_adj)
         return ypred
 
@@ -572,6 +576,9 @@ class ExplainModule(nn.Module):
             lap_loss = 0
 
         loss = pred_loss + size_loss + lap_loss + mask_ent_loss + feat_size_loss
+
+        #loss = pred_loss
+
         if self.writer is not None:
             self.writer.add_scalar("optimization/size_loss", size_loss, epoch)
             self.writer.add_scalar("optimization/feat_size_loss", feat_size_loss, epoch)
