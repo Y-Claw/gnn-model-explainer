@@ -1,7 +1,0 @@
-srun: job 95076 queued and waiting for resources
-srun: job 95076 has been allocated resources
-srun: error: slurm_receive_msgs: Socket timed out on send/recv operation
-srun: error: Task launch for 95076.0 failed on node dell-gpu-01: Socket timed out on send/recv operation
-srun: error: Application launch failed: Socket timed out on send/recv operation
-srun: Job step aborted: Waiting up to 32 seconds for job step to finish.
-srun: error: Timed out waiting for job step to complete
