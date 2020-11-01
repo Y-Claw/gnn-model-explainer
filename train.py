@@ -607,7 +607,7 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
     test_labels = np.expand_dims(test_labels, axis=0)
     test_labels = torch.tensor(test_labels, dtype=torch.long)
     if args.gpu:
-        ypred_test = model(x.cuda(), adj.cuda(), test_data.cuda())
+        ypred_test = model(x.cuda(), adj, test_data.cuda())
     else:
         ypred_test = model(x, adj, test_data)
 
