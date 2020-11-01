@@ -111,11 +111,6 @@ class GCN(torch.nn.Module):
             adj2 = adj2[:, [0, 1]].transpose(0, 1)
             adj2 = torch.squeeze(adj2)
 
-        if self.args.gpu:
-            adj_t.cuda()
-            if adj2 is not None:
-                adj2.cuda()
-
         x = torch.squeeze(x)
 
         #adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1)
@@ -137,7 +132,7 @@ class GCN(torch.nn.Module):
             self.dst_edge_weight.retain_grad()
 
         for conv in self.convs[:-1]:
-            x = conv(x, adj_t, edge_weight=src_edge_weight)
+            x = conv(x, adj_t.cuda() if self.args.gpu else adj_t, edge_weight=src_edge_weight)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         self.embedding_tensor = self.convs[-1](x, adj_t)
@@ -148,7 +143,7 @@ class GCN(torch.nn.Module):
             x2 = torch.squeeze(x2)
             adj2 = torch.squeeze(adj2)
             for conv in self.convs[:-1]:
-                x2 = conv(x2, adj2, dst_edge_weight)
+                x2 = conv(x2, adj2.cuda() if self.args.gpu else adj2, dst_edge_weight)
                 x2 = F.relu(x2)
                 x2 = F.dropout(x2, p=self.dropout, training=self.training)
             self.dst_embedding_tensor = self.convs[-1](x2, adj2)
