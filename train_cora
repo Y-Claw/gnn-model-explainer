@@ -1,0 +1,3 @@
+#!/bin/bash
+source /home/LAB/anaconda3/bin/activate /home/LAB/hanzy/.conda/envs/SEAL_OGB
+nohup srun --gres=gpu:1 -t 2-0:0 python train.py --dataset cora --epochs 10000 --multi_label True --gpu --model ogb_GCN > log_train_cora.txt 2>&1 &

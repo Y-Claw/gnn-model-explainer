@@ -1,0 +1,29 @@
+srun: job 95085 queued and waiting for resources
+srun: job 95085 has been allocated resources
+CUDA 1
+load graph time:  1.3511486053466797
+Num pos training edges:  18336 ; Num pos testing edges:  4585
+Number of edges left in Graph:  91691
+prepare training and testing data time:  0.42327213287353516
+construct model time:  6.341063499450684
+Traceback (most recent call last):
+  File "train.py", line 827, in <module>
+    main()
+  File "train.py", line 816, in main
+    link_prediction_task(prog_args, writer=None)
+  File "train.py", line 780, in link_prediction_task
+    model = train_link_classifier(graph, node_labels, train_data, train_labels, test_data, test_labels, model, args, writer=writer)
+  File "train.py", line 294, in train_link_classifier
+    ypred_train = model(x.cuda(), adj.cuda(), train_data.cuda())
+  File "/home/LAB/hanzy/.conda/envs/SEAL_OGB/lib/python3.8/site-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/LAB/hanzy/yhx/codes/gnn-model-explainer/models.py", line 384, in forward
+    self.embedding_tensor = self.gcn_forward(
+  File "/home/LAB/hanzy/yhx/codes/gnn-model-explainer/models.py", line 255, in gcn_forward
+    x = conv_block[i](x, adj)
+  File "/home/LAB/hanzy/.conda/envs/SEAL_OGB/lib/python3.8/site-packages/torch/nn/modules/module.py", line 722, in _call_impl
+    result = self.forward(*input, **kwargs)
+  File "/home/LAB/hanzy/yhx/codes/gnn-model-explainer/models.py", line 76, in forward
+    y = torch.matmul(adj, x)
+RuntimeError: CUDA out of memory. Tried to allocate 12.57 GiB (GPU 0; 31.75 GiB total capacity; 25.16 GiB already allocated; 5.41 GiB free; 25.17 GiB reserved in total by PyTorch)
+srun: error: dell-gpu-03: task 0: Exited with exit code 1
