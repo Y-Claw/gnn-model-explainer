@@ -292,7 +292,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
         model.zero_grad()
 
         if args.gpu:
-            ypred_train = model(x.cuda(), adj.cuda(), train_data.cuda())
+            ypred_train = model(x.cuda(), adj, train_data.cuda())
         else:
             ypred_train = model(x, adj, train_data)
 
