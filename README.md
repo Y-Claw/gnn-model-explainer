@@ -1,9 +1,3 @@
-# Instrution
-This branch is for link prediction. 
-The 'adj' in codes is in the form of dense matrix rather than sparse matrix. 
-For explainer, it first combine the explanation results for src_node and dst_node, then denoise it.
-
-
 # gnn-explainer
 
 This repository contains the source code for the paper `GNNExplainer: Generating Explanations for Graph Neural Networks` by [Rex Ying](https://cs.stanford.edu/people/rexy/), [Dylan Bourgeois](https://dtsbourg.me/), [Jiaxuan You](https://cs.stanford.edu/~jiaxuan/), [Marinka Zitnik](http://helikoid.si/cms/) & [Jure Leskovec](https://cs.stanford.edu/people/jure/), presented at [NeurIPS 2019](nips.cc).

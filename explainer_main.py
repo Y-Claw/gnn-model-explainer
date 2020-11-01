@@ -18,17 +18,8 @@ import utils.io_utils as io_utils
 import utils.parser_utils as parser_utils
 from explainer import explain
 import sys
-import random
-import numpy as np
-
-
-def setup_seed(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    torch.backends.cudnn.deterministic = True
-
+sys.path.append('P-GNN')
+from model import *
 
 def arg_parse():
     parser = argparse.ArgumentParser(description="GNN Explainer arguments.")
@@ -151,20 +142,44 @@ def arg_parse():
 
     parser.add_argument('--link_prediction', dest='link_prediction',
                         help='whether do link prediction task')
+    parser.add_argument('--directed_graph', dest='directed_graph',
+                        help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
     parser.add_argument('--multi_class', dest='multi_class',
                         help='whether multi class classification for link prediction')
     parser.add_argument('--multi_label', dest='multi_label',
                         help='whether multi label classification for link prediction')
-    parser.add_argument('--n_hops', dest='n_hops',
+    parser.add_argument('--n_hops', dest='n_hops', type=int,
                         help='n hops neighboors')
-    parser.add_argument('--edge_threshold', dest='edge_threshold',
+    parser.add_argument('--edge_threshold', dest='edge_threshold',type=float,
                         help='the edge threshold for filtering during explanation')
     parser.add_argument('--feat_threshold', dest='feat_threshold',
                         help='the feature threshold for filtering during explanation')
+    parser.add_argument('--edge_num_threshold_src_or_dst', dest='edge_num_threshold_src_or_dst', type=int,
+                        help='the max number of edges of the explanation results, for src or dst nodes')
+    parser.add_argument('--model', dest='model', type=str,
+                        help='the max number of edges of the explanation results, for src or dst nodes')
+    parser.add_argument(
+        "--save", dest="save", type=str, help="pred; embedding"
+    )
+    parser.add_argument(
+        "--feat_dim", dest="feat_dim", type=int, help="pred; embedding", default=5
+    )
+    parser.add_argument(
+        "--input_dim", dest="input_dim", type=int, help="pred; embedding", default=5
+    )
+
     parser.add_argument('--max_edges_num', dest='max_edges_num',
                         help='the max number of edges of the explanation results')
+
+    parser.add_argument(
+        "--sample_num", dest="sample_num", type=int, help="sample_num", default=10
+    )
+
+    parser.add_argument(
+        "--sp", dest="sp", type=bool, help="seprate graph or not", default=False
+    )
 
     # TODO: Check argument usage
     parser.set_defaults(
@@ -172,18 +187,19 @@ def arg_parse():
         gpu=False,
         logdir="log",
         ckptdir="ckpt",
-        dataset="USAir",
+        dataset="USAir",                # test-multi_class
+        directed_graph=True,
         link_prediction=True,
-        single_edge_label=True,
-        multi_class=False,
+        single_edge_label=True,         # False
+        multi_class=False,              # True
         multi_label=False,
-        n_hops=2,
+        n_hops=1,
         lr=0.1,
         num_epochs=1000,
         edge_threshold=0.5,
         feat_threshold=0.5,
+        edge_num_threshold_src_or_dst=3,
         max_edges_num=15,
-        writer=False,
 
         # no change is ok for the following arguments:
         opt="adam",
@@ -204,6 +220,8 @@ def arg_parse():
         mask_act="sigmoid",
         multigraph_class=-1,
         multinode_class=-1,
+        model="default",
+        save="pred",
     )
     return parser.parse_args()
 
@@ -240,15 +258,32 @@ def main():
     # build model
     print("Method: ", prog_args.method)
     if prog_args.link_prediction is True:
-        model = models.GcnEncoderNode(
-            input_dim=input_dim,
-            hidden_dim=prog_args.hidden_dim,
-            embedding_dim=prog_args.output_dim,
-            label_dim=num_classes,
-            num_layers=prog_args.num_gc_layers,
-            bn=prog_args.bn,
-            args=prog_args,
-        )
+        if prog_args.model == "default":
+            model = models.GcnEncoderNode(
+                input_dim=input_dim,
+                hidden_dim=prog_args.hidden_dim,
+                embedding_dim=prog_args.output_dim,
+                label_dim=num_classes,
+                num_layers=prog_args.num_gc_layers,
+                bn=prog_args.bn,
+                args=prog_args,
+            )
+        else:
+            model = eval(prog_args.model)(
+                input_dim=prog_args.input_dim,
+                feature_dim=prog_args.feat_dim,
+                feature_pre=False,
+                dropout=True,
+                hidden_dim=prog_args.hidden_dim,
+                output_dim=prog_args.output_dim,
+                label_dim=num_classes,
+                layer_num=prog_args.num_gc_layers,
+                bn=prog_args.bn,
+                args=prog_args,
+            )
+
+    model = torch.nn.DataParallel(model)
+
     if prog_args.gpu:
         model = model.cuda()
     # load state_dict (obtained by model.state_dict() when saving checkpoint)
@@ -272,18 +307,18 @@ def main():
         print_training=True,
         graph_mode=False,
         graph_idx=prog_args.graph_idx,
+        label_dic=cg_dict["label_dic"]
     )
     # adj[u][v] = 1 means that, there's an edge from node v to node u. (directed graph)
 
     if prog_args.link_prediction is True:
         print("begin explaining a set of links one by one...")
-        src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res = explainer.explain_a_set_of_links(
+        src_explain_res, dst_explain_res, denoise_res = explainer.explain_a_set_of_links(
             prog_args
         )
         print("finish explaining all links.")
 
 
 if __name__ == "__main__":
-    setup_seed(1226)
     main()
 

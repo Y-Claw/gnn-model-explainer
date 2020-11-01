@@ -74,6 +74,8 @@ def arg_parse():
 
     parser.add_argument('--link_prediction', dest='link_prediction',
                         help='whether do link prediction task')
+    parser.add_argument('--directed_graph', dest='directed_graph',
+                        help='whether graph is directed')
     parser.add_argument('--single_edge_label', dest='single_edge_label',
                         help='whether there is only one type of edges in the graph')
     parser.add_argument('--multi_class', dest='multi_class',
@@ -86,8 +88,6 @@ def arg_parse():
                         help='the batch size for predicting')
     parser.add_argument('--predict_threshold', dest='predict_threshold',
                         help='threshold for deciding whether a link exsits when predicting')
-    parser.add_argument('--model', dest='model',
-                        help='training model')
 
     parser.set_defaults(
                         # mainly change the following arguments:
@@ -95,13 +95,14 @@ def arg_parse():
                         datadir='data', # io_parser
                         logdir='log',
                         ckptdir='ckpt',
-                        dataset='USAir',
+                        dataset='USAir',            # test-multi_class
+                        directed_graph=True,
                         link_prediction=True,
                         predict_batch_size=5000000,
                         predict_threshold=0.8,
                         # regardless of types of nodes, only care the number of edge types!
-                        single_edge_label=False,
-                        multi_class=False,
+                        single_edge_label=True,     # False
+                        multi_class=False,          # True
                         multi_label=False,
                         fraction=0.2,
                         train_ratio=0.8,
@@ -128,7 +129,6 @@ def arg_parse():
                         method='base',
                         name_suffix='',
                         assign_ratio=0.1,
-                        model="GcnEncoderNode"
                        )
     return parser.parse_args()
 

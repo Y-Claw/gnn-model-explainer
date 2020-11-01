@@ -116,4 +116,7 @@ path/
 .idea/
 .vscode/
 
-
+data/
+P-GNN/data/
+P-GNN/ckpt/
+P-GNN/datasets/
