@@ -66,6 +66,8 @@ class GCN(torch.nn.Module):
                                        num_layers=num_layers,
                                         dropout=dropout)
 
+        self.args = args
+
         self.single_edge_label = args.single_edge_label
         self.multi_label = args.multi_label
         self.multi_class = args.multi_class
@@ -108,6 +110,11 @@ class GCN(torch.nn.Module):
         elif adj2 is not None:
             adj2 = adj2[:, [0, 1]].transpose(0, 1)
             adj2 = torch.squeeze(adj2)
+
+        if self.args.gpu:
+            adj_t.cuda()
+            if adj2 is not None:
+                adj2.cuda()
 
         x = torch.squeeze(x)
 
