@@ -504,7 +504,7 @@ class ExplainModule(nn.Module):
                 else:
                     pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float())
         # size
-        bias = 0.00001
+        bias = torch.tensor(0.00001).cuda() if self.args.gpu else torch.tensor(0.00001)
         src_mask = self.src_mask
         dst_mask = self.dst_mask
         if self.mask_act == "sigmoid":
@@ -513,8 +513,9 @@ class ExplainModule(nn.Module):
         elif self.mask_act == "ReLU":
             src_mask = nn.ReLU()(self.src_mask)
             dst_mask = nn.ReLU()(self.dst_mask)
-        src_mask = src_mask*torch.squeeze(self.src_adj).detach().cpu() + bias
-        dst_mask = dst_mask*torch.squeeze(self.dst_adj).detach().cpu() + bias
+        print(src_mask.device, self.src_adj.device)
+        src_mask = src_mask*torch.squeeze(self.src_adj.cuda() if self.args.gpu else self.src_adj) + bias
+        dst_mask = dst_mask*torch.squeeze(self.dst_adj.cuda() if self.args.gpu else self.dst_adj) + bias
         src_size_loss = self.coeffs["size"] * torch.sum(src_mask)
         dst_size_loss = self.coeffs["size"] * torch.sum(dst_mask)
         size_loss = src_size_loss + dst_size_loss
