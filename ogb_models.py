@@ -57,7 +57,7 @@ class GCN(torch.nn.Module):
             GCNConv(hidden_channels, out_channels, normalize=False))
 
         self.dropout = dropout
-        self.bceloss = nn.BCELoss()
+        self.bceWithLogitsLoss = nn.BCEWithLogitsLoss()
         self.celoss = nn.CrossEntropyLoss()
 
         self.predictor = LinkPredictor(in_channels=out_channels,
@@ -174,7 +174,7 @@ class GCN(torch.nn.Module):
             pred = torch.transpose(pred, 1, 2)
             return self.celoss(pred, label)
         elif self.multi_label:
-            return self.bceloss(pred, label.float())
+            return self.bceWithLogitsLoss(pred, label.float())
 
 #from ogb_seal
 class SAGE(torch.nn.Module):

@@ -698,7 +698,7 @@ def evaluate_link(model, adj, x, test_data, test_labels, ypred_train, train_labe
 
         # auc_train = metrics.roc_curve(train_labels.ravel(), ypred_train.ravel())
         # auc_test = metrics.roc_curve(test_labels.ravel(), ypred_test.ravel())
-        if (train_labels.shape[-1] != 1):
+        if (train_labels.shape[-1] != 1 and train_labels.shape[-2] > 1):
             auc_train = metrics.roc_auc_score(train_labels, ypred_train)
             auc_test = metrics.roc_auc_score(test_labels, ypred_test)
         else:
