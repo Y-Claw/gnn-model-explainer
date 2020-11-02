@@ -430,8 +430,11 @@ def read_graphfile(datadir, dataname, args):
     Returns:
         List of networkx objects with graph and node labels
     """
-    prefix = os.path.join(datadir, dataname, dataname)
+    filename = dataname + ("_part_" + args.sp_part if args.sp else "")
+    dataname = dataname + ("_sp" if args.sp else "")
 
+    prefix = os.path.join(datadir, dataname, filename)
+    print(prefix)
     # filename_nodes = prefix + "_node_labels.txt"
     # node_labels = []
     # min_label_val = None

@@ -86,8 +86,13 @@ def arg_parse():
                         help='the batch size for predicting')
     parser.add_argument('--predict_threshold', dest='predict_threshold',
                         help='threshold for deciding whether a link exsits when predicting')
+
     parser.add_argument('--model', dest='model',
                         help='training model')
+    parser.add_argument('--sp', dest='sp', type=bool, default=False,
+                        help='if use separate graph')
+    parser.add_argument('--sp_part', dest='sp_part', type=str, default=0,
+                        help='use which part of graph')
 
     parser.set_defaults(
                         # mainly change the following arguments:
