@@ -129,6 +129,8 @@ class Explainer:
             src_explanation_results, dst_explanation_results = self.explain_link(
                     src_idx, dst_idx, link_label, pred_label, args
             )
+            if src_explanation_results is None:
+                continue
             src_explain_res.append(src_explanation_results)
             dst_explain_res.append(dst_explanation_results)
 
@@ -156,6 +158,8 @@ class Explainer:
         dst_idx_new, dst_adj, dst_sub_feat, dst_sub_label, dst_neighbors = self.extract_n_hops_neighborhood(
             dst_idx
         )
+        if src_adj.shape[0] <= 1 or dst_adj.shape[0] <= 1:
+            return None, None
         src_adj = np.expand_dims(src_adj, axis=0)
         dst_adj = np.expand_dims(dst_adj, axis=0)
         src_sub_feat = np.expand_dims(src_sub_feat, axis=0)
@@ -513,7 +517,7 @@ class ExplainModule(nn.Module):
         elif self.mask_act == "ReLU":
             src_mask = nn.ReLU()(self.src_mask)
             dst_mask = nn.ReLU()(self.dst_mask)
-        print(src_mask.device, self.src_adj.device)
+        #print(src_mask.device, self.src_adj.device)
         src_mask = src_mask*torch.squeeze(self.src_adj.cuda() if self.args.gpu else self.src_adj) + bias
         dst_mask = dst_mask*torch.squeeze(self.dst_adj.cuda() if self.args.gpu else self.dst_adj) + bias
         src_size_loss = self.coeffs["size"] * torch.sum(src_mask)

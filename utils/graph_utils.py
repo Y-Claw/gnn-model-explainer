@@ -157,6 +157,6 @@ def neighborhoods(adj, n_hops, use_cuda):
         hop_adj = hop_adj + power_adj
         #hop_adj = (hop_adj > 0).float()
         temp = (hop_adj > 0).nonzero()
-        hop_adj = sp.coo_matrix(([1] * temp[0].shape[0], temp))
+        hop_adj = sp.coo_matrix(([1] * temp[0].shape[0], temp), shape=hop_adj.shape)
     #return hop_adj.cpu().numpy().astype(int)
     return [hop_adj.tocsc()]

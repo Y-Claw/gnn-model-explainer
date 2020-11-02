@@ -158,7 +158,7 @@ def arg_parse():
                         help='whether multi class classification for link prediction')
     parser.add_argument('--multi_label', dest='multi_label',
                         help='whether multi label classification for link prediction')
-    parser.add_argument('--n_hops', dest='n_hops',
+    parser.add_argument('--n_hops', dest='n_hops', type=int,
                         help='n hops neighboors')
     parser.add_argument('--edge_threshold', dest='edge_threshold',
                         help='the edge threshold for filtering during explanation')
@@ -292,7 +292,7 @@ def main():
 
     if prog_args.link_prediction is True:
         print("begin explaining a set of links one by one...")
-        src_explain_res, dst_explain_res, src_denoise_res, dst_denoise_res = explainer.explain_a_set_of_links(
+        src_explain_res, dst_explain_res, denoise_res = explainer.explain_a_set_of_links(
             prog_args
         )
         print("finish explaining all links.")
