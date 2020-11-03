@@ -117,4 +117,5 @@ path/
 .vscode/
 
 data/
-explanations/
+*.bash
+explanation/
