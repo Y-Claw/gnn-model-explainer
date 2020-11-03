@@ -37,10 +37,11 @@ class LinkPredictor(torch.nn.Module):
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
         x = self.lins[-1](x)
-        x = F.normalize(x, p=2, dim=-1)
+        #x = F.normalize(x, p=2, dim=-1)
         self.x = x
         self.x.retain_grad()
-        return x.log_softmax(-1)
+        return x
+        #return x.log_softmax(-1)
 
 class GCN(torch.nn.Module):
     def __init__(self, in_channels, hidden_channels, out_channels, num_layers,
@@ -118,11 +119,14 @@ class GCN(torch.nn.Module):
 
         x = torch.squeeze(x)
 
-        #adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1)
+        adj_t = torch.cat((adj_t, adj_t[[1, 0], :]), -1)
+
         if adj2 is None:
             src_idx = train_edges[:, 0]
             dst_idx = train_edges[:, 1]
         else:
+            adj2 = torch.cat((adj2, adj2[[1, 0], :]), -1)
+
             src_idx = train_edges[0]
             dst_idx = train_edges[1]
             src_edge_weight = [adj_t_origin[0,i,j].unsqueeze(0) if i < j else adj_t_origin[0,j,i].unsqueeze(0) for [i, j] in adj_t.permute(1, 0)]
@@ -135,6 +139,8 @@ class GCN(torch.nn.Module):
             self.dst_edge_weight = dst_edge_weight
 
             self.dst_edge_weight.retain_grad()
+
+
 
         for conv in self.convs[:-1]:
             x = conv(x, adj_t, edge_weight=src_edge_weight)
@@ -172,9 +178,13 @@ class GCN(torch.nn.Module):
         #pred = torch.squeeze(pred, -1)
         if self.single_edge_label or self.multi_class:
             pred = torch.transpose(pred, 1, 2)
+
             return self.celoss(pred, label)
         elif self.multi_label:
+            #_, label = torch.max(label.reshape(label.shape[1:]), dim=-1)
             return self.bceWithLogitsLoss(pred, label.float())
+            #return F.nll_loss(pred.reshape(pred.shape[1:]), label)
+            #return self.celoss(pred.reshape(pred.shape[1:]), label)
 
 #from ogb_seal
 class SAGE(torch.nn.Module):

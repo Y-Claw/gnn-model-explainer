@@ -368,7 +368,7 @@ class ExplainModule(nn.Module):
         self.scheduler, self.optimizer = train_utils.build_optimizer(args, params)
 
         self.coeffs = {
-            "size": 0.001,
+            "size": 0.00001,
             "feat_size": 1.0,
             "ent": 1.0,
             "feat_ent": 0.1,
@@ -498,10 +498,18 @@ class ExplainModule(nn.Module):
             # logit = pred[gt_label_node]
             # pred_loss = -torch.log(logit)
             if self.args.single_edge_label or self.args.multi_class:
-                if self.args.gpu:
-                    pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()).cuda())
+                if self.args.model == "ogb_GCN":
+
+                    if self.args.gpu:
+                        pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()).cuda())
+                    else:
+                        pred_loss = torch.sum(torch.abs(pred - pred_label))
                 else:
-                    pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
+                    if self.args.gpu:
+                        pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()).cuda())
+                    else:
+                        pred_loss = torch.nn.functional.binary_cross_entropy(torch.sigmoid(pred), torch.sigmoid(pred_label.float()))
+
             elif self.args.multi_label:
                 if self.args.gpu:
                     pred_loss = torch.nn.functional.binary_cross_entropy(pred, pred_label.float().cuda())
