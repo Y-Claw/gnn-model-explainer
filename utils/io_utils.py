@@ -31,6 +31,7 @@ import random
 # from rdkit import Chem
 
 import utils.featgen as featgen
+import scipy.sparse as sp
 
 use_cuda = torch.cuda.is_available()
 
@@ -136,7 +137,7 @@ def denoise_adj_feat(
     dst_idx = src_dst_explanation["dst_idx_new"]
     adj = src_dst_explanation["pattern_adj"]
     minEle = min(adj.ravel()[np.flatnonzero(adj)])
-    adj = (adj - minEle) / (adj.max() - minEle)
+    #adj = (adj - minEle) / (adj.max() - minEle)
     feat = src_dst_explanation["pattern_feat"]
     neighbors = src_dst_explanation["pattern_nodes"]
 
@@ -520,12 +521,14 @@ def read_graphfile(datadir, dataname, args):
     adj_list = []
     edge_labels = []
     num_edges = 0
+    label = sp.lil_matrix((max(node_ids)+1, max(node_ids)+1))
     with open(filename_e) as f:
         for line in f:
             line = line.strip("\n").split("\t")
             src, dst, elabel = int(line[0]), int(line[1]), int(line[2])
             adj_list.append((src, dst, dict(label=elabel)))
             edge_labels.append(elabel)
+            label[src, dst] = elabel
             num_edges += 1
     # the order of edge_labels for graph.edges() is not corresponding!
     num_edge_labels = max(edge_labels) + 1
@@ -534,6 +537,18 @@ def read_graphfile(datadir, dataname, args):
     G = nx.MultiDiGraph()
     G.add_nodes_from(node_ids)
     G.add_edges_from(adj_list)
+
+    label_dic = {}
+
+    for i in range(num_edge_labels):
+        label_dic[i] = []
+
+    count = 0
+    for edge in G.edges:
+        label_dic[label[edge[0], edge[1]]].append(count)
+        count += 1
+
+    G.labels = label_dic
 
     # if not args.multi_label:
     #     for u in G.nodes():
@@ -548,11 +563,18 @@ def read_graphfile(datadir, dataname, args):
     #             G.nodes[u]["label"] = node_label_one_hot
     #         if len(node_attrs) > 0:
     #             G.nodes[u]["feat"] = node_attrs[u]
-    for u in G.nodes():
+    """for u in G.nodes():
         G.nodes[u]["label"] = node_labels[u]
         G.nodes[u]["feat"] = node_attrs[u]
     if len(node_attrs) > 0:
+        G.graph["feat_dim"] = node_attrs[0].shape[0]"""
+
+    for u in range(len(node_ids)):
+        G.nodes[node_ids[u]]["label"] = node_labels[u]
+        G.nodes[node_ids[u]]["feat"] = node_attrs[u]
+    if len(node_attrs) > 0:
         G.graph["feat_dim"] = node_attrs[0].shape[0]
+
 
     # # relabeling
     # mapping = {}
