@@ -120,3 +120,4 @@ data/
 *.bash
 explanation/
 checkdata.py
+*.txt
