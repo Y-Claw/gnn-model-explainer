@@ -55,6 +55,14 @@ def setup_seed(seed):
 #
 #############################
 def prepare_data(graph, num_edge_labels, args):
+
+    graph.remove_edges_from(nx.selfloop_edges(graph))
+    # relabel graphs
+    keys = list(graph.nodes)
+    vals = range(graph.number_of_nodes())
+    mapping = dict(zip(keys, vals))
+    nx.relabel_nodes(graph, mapping, copy=False)
+
     edges = list(graph.edges())
     num_edges = len(edges)
     num_nodes = graph.number_of_nodes()
@@ -273,7 +281,7 @@ def train_link_classifier(G, node_labels, train_data, train_labels, test_data, t
     train_labels = np.expand_dims(train_labels, axis=0)
 
     x = torch.tensor(x, requires_grad=True, dtype=torch.float)
-    train_labels = torch.tensor(train_labels, dtype=torch.long)
+    train_labels = torch.from_numpy(train_labels)
     train_data = torch.tensor(train_data, dtype=torch.long)
     test_data = torch.tensor(test_data, dtype=torch.long)
 

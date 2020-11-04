@@ -177,7 +177,7 @@ class GCN(torch.nn.Module):
         #label = torch.squeeze(label)
         #pred = torch.squeeze(pred, -1)
         if self.single_edge_label or self.multi_class:
-            pred = torch.transpose(pred, 1, 2)
+            pred = torch.transpose(pred, -1, -2)
 
             return self.celoss(pred, label)
         elif self.multi_label:

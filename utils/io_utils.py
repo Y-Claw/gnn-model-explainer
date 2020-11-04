@@ -498,10 +498,14 @@ def read_graphfile(datadir, dataname, args):
     node_ids = []
     node_labels = []
     node_attrs = []
+    count = 0
     with open(filename_v) as f:
         for line in f:
             if line == "\n":
                 continue
+            """count = count + 1
+            if count > 1000:
+                break"""
             line = line.strip("\n").split("\t")
             node_ids.append(int(line[0]))
             node_labels.append(int(line[1]))
@@ -522,10 +526,14 @@ def read_graphfile(datadir, dataname, args):
     edge_labels = []
     num_edges = 0
     label = sp.lil_matrix((max(node_ids)+1, max(node_ids)+1))
+    count = 0
     with open(filename_e) as f:
         for line in f:
             line = line.strip("\n").split("\t")
             src, dst, elabel = int(line[0]), int(line[1]), int(line[2])
+            """if src not in node_ids or dst not in node_ids:
+                print("node don't exit", src, dst)
+                continue"""
             adj_list.append((src, dst, dict(label=elabel)))
             edge_labels.append(elabel)
             label[src, dst] = elabel
@@ -538,7 +546,12 @@ def read_graphfile(datadir, dataname, args):
     G.add_nodes_from(node_ids)
     G.add_edges_from(adj_list)
 
-    label_dic = {}
+    for i in G.nodes:
+        if G.degree[i] == 0:
+            print("remove", i)
+            G.remove_node(i)
+
+    """label_dic = {}
 
     for i in range(num_edge_labels):
         label_dic[i] = []
@@ -548,7 +561,7 @@ def read_graphfile(datadir, dataname, args):
         label_dic[label[edge[0], edge[1]]].append(count)
         count += 1
 
-    G.labels = label_dic
+    G.labels = label_dic"""
 
     # if not args.multi_label:
     #     for u in G.nodes():
