@@ -119,3 +119,4 @@ path/
 data/
 *.bash
 explanation/
+checkdata.py
