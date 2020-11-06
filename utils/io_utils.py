@@ -499,6 +499,7 @@ def read_graphfile(datadir, dataname, args):
     node_labels = []
     node_attrs = []
     count = 0
+    ids = set({})
     with open(filename_v) as f:
         for line in f:
             if line == "\n":
@@ -508,10 +509,11 @@ def read_graphfile(datadir, dataname, args):
                 break"""
             line = line.strip("\n").split("\t")
             node_ids.append(int(line[0]))
+            ids.add(int(line[0]))
             node_labels.append(int(line[1]))
             # node_attrs.append(attribute2vec(line[2:]))
             attr_list = []
-            for attr in line[2:]:
+            for attr in line[1:]:
                 attr = attr.split(" ")  # for k-dimension feature vectors (k > 1)
                 if len(attr) == 1:
                     attr_list.append(float(attr[0]))
@@ -531,9 +533,9 @@ def read_graphfile(datadir, dataname, args):
         for line in f:
             line = line.strip("\n").split("\t")
             src, dst, elabel = int(line[0]), int(line[1]), int(line[2])
-            """if src not in node_ids or dst not in node_ids:
+            if src not in ids or dst not in ids:
                 print("node don't exit", src, dst)
-                continue"""
+                continue
             adj_list.append((src, dst, dict(label=elabel)))
             edge_labels.append(elabel)
             label[src, dst] = elabel
